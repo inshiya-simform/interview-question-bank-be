@@ -7,15 +7,38 @@ datasource db {
   provider = "postgresql"
 }
 
-enum Role {
-  AUTHOR
-  REVIEWER
-  USER
-}
-
 enum HistoryAction {
   CREATED
   UPDATED
+}
+
+// Roles and permissions are data, not code: adding a role or changing what a
+// role may do is a seed/data change. Client visibility is NOT modelled here;
+// it stays in ClientPermission and in the query's WHERE clause.
+model Role {
+  id   Int    @id @default(autoincrement())
+  name String @unique // AUTHOR | REVIEWER | USER
+
+  permissions RolePermission[]
+  users       User[]
+}
+
+model Permission {
+  id   Int    @id @default(autoincrement())
+  code String @unique // question:read | question:create | question:edit_own | question:edit_any
+
+  roles RolePermission[]
+}
+
+model RolePermission {
+  roleId       Int
+  permissionId Int
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
 }
 
 model User {
@@ -23,8 +46,10 @@ model User {
   email        String   @unique
   name         String
   passwordHash String
-  role         Role     @default(USER)
+  roleId       Int
   createdAt    DateTime @default(now())
+
+  role Role @relation(fields: [roleId], references: [id])
 
   questions   Question[]         @relation("QuestionAuthor")
   permissions ClientPermission[]

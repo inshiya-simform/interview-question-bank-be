@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient, Role } from '../src/generated/prisma/client.js';
+import { PrismaClient } from '../src/generated/prisma/client.js';
 import { normalizeText } from '../src/utils/normalize.js';
 
 const prisma = new PrismaClient({
@@ -16,23 +16,50 @@ const taxonomy: Record<string, { name: string; tags: string[] }> = {
   'question-type': { name: 'Question type', tags: ['conceptual', 'coding', 'system-design', 'behavioural'] },
 };
 
+// role -> permission codes. Changing access is a data change: edit this map (or the rows).
+const rolePermissions: Record<string, string[]> = {
+  AUTHOR: ['question:read', 'question:create', 'question:edit_own'],
+  REVIEWER: ['question:read', 'question:edit_any'],
+  USER: ['question:read'],
+};
+
 async function main() {
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
+
+  const permissionCodes = [...new Set(Object.values(rolePermissions).flat())];
+  const permissions = new Map<string, number>();
+  for (const code of permissionCodes) {
+    const p = await prisma.permission.upsert({ where: { code }, update: {}, create: { code } });
+    permissions.set(code, p.id);
+  }
+  const roles = new Map<string, number>();
+  for (const [name, codes] of Object.entries(rolePermissions)) {
+    const role = await prisma.role.upsert({ where: { name }, update: {}, create: { name } });
+    roles.set(name, role.id);
+    for (const code of codes) {
+      const permissionId = permissions.get(code)!;
+      await prisma.rolePermission.upsert({
+        where: { roleId_permissionId: { roleId: role.id, permissionId } },
+        update: {},
+        create: { roleId: role.id, permissionId },
+      });
+    }
+  }
 
   const users = await Promise.all(
     (
       [
-        ['author@example.com', 'Alice Author', Role.AUTHOR],
-        ['author2@example.com', 'Aaron Author', Role.AUTHOR],
-        ['reviewer@example.com', 'Riya Reviewer', Role.REVIEWER],
-        ['user@example.com', 'Uma User', Role.USER],
-        ['acme-user@example.com', 'Adam Acme', Role.USER],
+        ['author@example.com', 'Alice Author', 'AUTHOR'],
+        ['author2@example.com', 'Aaron Author', 'AUTHOR'],
+        ['reviewer@example.com', 'Riya Reviewer', 'REVIEWER'],
+        ['user@example.com', 'Uma User', 'USER'],
+        ['acme-user@example.com', 'Adam Acme', 'USER'],
       ] as const
     ).map(([email, name, role]) =>
       prisma.user.upsert({
         where: { email },
         update: {},
-        create: { email, name, role, passwordHash },
+        create: { email, name, roleId: roles.get(role)!, passwordHash },
       }),
     ),
   );
