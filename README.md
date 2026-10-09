@@ -10,11 +10,15 @@ Shared, searchable bank of interview/screening questions. Anyone can browse ques
 
 ## 1. Actors & permissions
 
-| Role | Add | Edit | Read |
-|---|---|---|---|
-| `AUTHOR` | yes | own entries only | everything they're permitted to see |
-| `REVIEWER` | yes | any entry | everything they're permitted to see |
-| `USER` | no | no | everything they're permitted to see |
+Roles and permissions are rows, not code. A role is a named set of permission codes, so changing what a role may do (or adding a role) is a data change.
+
+| Role | Permissions |
+|---|---|
+| `AUTHOR` | `question:read`, `question:create`, `question:edit_own` |
+| `REVIEWER` | `question:read`, `question:edit_any` (cannot add) |
+| `USER` | `question:read` |
+
+Edit rule: `question:edit_any`, or `question:edit_own` and `question.authorId === user.id`. Routes are gated with `requirePermission('<code>')`.
 
 **Client permission** (`ClientPermission`): grants one user visibility into one client's questions. Independent of role — a Reviewer without a grant still cannot see a client's questions.
 
@@ -34,15 +38,18 @@ A question is **visible** to user `U` iff `question.clientId IS NULL` OR a `Clie
 ## 3. Data model (Prisma)
 
 ```prisma
-enum Role { AUTHOR REVIEWER USER }
 enum HistoryAction { CREATED UPDATED }
+
+model Role           { id Int @id @default(autoincrement()) name String @unique  permissions RolePermission[]  users User[] }
+model Permission     { id Int @id @default(autoincrement()) code String @unique  roles RolePermission[] }
+model RolePermission { roleId Int  permissionId Int  @@id([roleId, permissionId]) }   // FKs to Role / Permission
 
 model User {
   id           String   @id @default(uuid())
   email        String   @unique
   name         String
   passwordHash String
-  role         Role     @default(USER)
+  roleId       Int                         // -> Role
   createdAt    DateTime @default(now())
 
   questions    Question[]          @relation("QuestionAuthor")
@@ -197,9 +204,9 @@ Base path `/api/v1`. JSON in/out. Auth via `Authorization: Bearer <JWT>`.
 | DELETE | `/clients/:id/permissions/:userId` | reviewer | Revoke |
 | GET | `/questions` | any | Filter + keyword search (see below) |
 | GET | `/questions/:id` | any | One question (404 if not visible) |
-| POST | `/questions` | author, reviewer | Create (runs duplicate check) |
-| PATCH | `/questions/:id` | author (own), reviewer | Edit |
-| POST | `/questions/check-duplicate` | author, reviewer | Dry-run duplicate check |
+| POST | `/questions` | `question:create` | Create (runs duplicate check) |
+| PATCH | `/questions/:id` | `edit_own` / `edit_any` | Edit |
+| POST | `/questions/check-duplicate` | `question:create` | Dry-run duplicate check |
 | GET | `/questions/:id/history` | any (visible) | Change history |
 
 ### `GET /questions`
@@ -233,7 +240,7 @@ Query params: `q` (keyword), `tags[<categorySlug>]=a,b` (e.g. `tags[technology]=
 
 **Rule:** normalise the text (lowercase, strip punctuation, collapse whitespace, drop leading "what is/how do you"-style stop phrases optionally), then compare against **visible** questions using `pg_trgm` `similarity()`. A match is `similarity >= 0.8` (tunable via `DUPLICATE_SIMILARITY_THRESHOLD`) — also an exact `normalizedText` match always counts. The query uses the trigram GIN index (`%` operator with `pg_trgm.similarity_threshold` set, then `similarity()` for ranking), top 5 returned.
 
-**False positive:** the author resubmits with `confirmDistinct: true` and a mandatory `distinctReason`. The question is stored and the override (matched IDs, reason, actor) is written to the audit log. Overriding is allowed for any author/reviewer; the reason is the accountability.
+**False positive:** the author resubmits with `confirmDistinct: true` and a mandatory `distinctReason`. The question is stored and the override (matched IDs, reason, actor) is written to the audit log. Overriding is allowed for anyone with `question:create`; the reason is the accountability.
 
 ## 7. Authorization & validation
 
