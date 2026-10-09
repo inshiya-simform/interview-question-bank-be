@@ -1,0 +1,128 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  AUTHOR
+  REVIEWER
+  USER
+}
+
+enum HistoryAction {
+  CREATED
+  UPDATED
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(USER)
+  createdAt    DateTime @default(now())
+
+  questions   Question[]         @relation("QuestionAuthor")
+  permissions ClientPermission[]
+  history     QuestionHistory[]
+}
+
+model Client {
+  id   String @id @default(uuid())
+  name String @unique
+
+  permissions ClientPermission[]
+  questions   Question[]
+}
+
+model ClientPermission {
+  userId    String
+  clientId  String
+  grantedAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@id([userId, clientId])
+  @@index([clientId])
+}
+
+model TagCategory {
+  id   Int    @id @default(autoincrement())
+  slug String @unique // technology | seniority | question-type | ...
+  name String
+
+  tags Tag[]
+}
+
+model Tag {
+  id         Int    @id @default(autoincrement())
+  categoryId Int
+  slug       String
+  name       String
+
+  category  TagCategory   @relation(fields: [categoryId], references: [id])
+  questions QuestionTag[]
+
+  @@unique([categoryId, slug])
+  // Target of the composite FK from QuestionTag(tagId, categoryId)
+  @@unique([id, categoryId])
+}
+
+model Question {
+  id             String   @id @default(uuid())
+  text           String
+  normalizedText String // lowercased, punctuation/whitespace-collapsed; used by duplicate check
+  answerNotes    String
+  clientId       String? // NULL = visible to all authenticated users
+  authorId       String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Generated column (see migration SQL); never written by the app.
+  searchVector Unsupported("tsvector")?
+
+  client  Client?           @relation(fields: [clientId], references: [id])
+  author  User              @relation("QuestionAuthor", fields: [authorId], references: [id])
+  tags    QuestionTag[]
+  history QuestionHistory[]
+
+  @@index([clientId])
+  @@index([authorId])
+  @@index([searchVector], type: Gin, map: "Question_searchVector_idx")
+  @@index([normalizedText(ops: raw("gin_trgm_ops"))], type: Gin, map: "Question_normalizedText_trgm_idx")
+}
+
+// categoryId is denormalised so a composite index can serve
+// "category = X AND tag IN (...)" without joining Tag. The composite FK to
+// Tag(id, categoryId) guarantees it always matches the tag's real category.
+model QuestionTag {
+  questionId String
+  tagId      Int
+  categoryId Int
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  tag      Tag      @relation(fields: [tagId, categoryId], references: [id, categoryId])
+
+  @@id([questionId, tagId])
+  @@index([tagId, questionId])
+  @@index([categoryId, tagId, questionId])
+}
+
+model QuestionHistory {
+  id         String        @id @default(uuid())
+  questionId String
+  actorId    String
+  action     HistoryAction
+  changes    Json // snapshot or before/after diff
+  createdAt  DateTime      @default(now())
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  actor    User     @relation(fields: [actorId], references: [id])
+
+  @@index([questionId, createdAt])
+}
