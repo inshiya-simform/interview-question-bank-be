@@ -1,4 +1,3 @@
-import { env } from '../config/env.js';
 
 // Add new endpoints under `paths` as they are built; reuse the shared `components`.
 export const openApiSpec = {
@@ -9,7 +8,7 @@ export const openApiSpec = {
     description:
       'Shared, searchable bank of interview questions with client-restricted visibility.',
   },
-  servers: [{ url: `http://localhost:${env.port}/api/v1`, description: 'Local' }],
+  servers: [{ url: '/api/v1', description: 'Current host' }],
   tags: [{ name: 'Health', description: 'Service status' }],
   paths: {
     '/health': {
