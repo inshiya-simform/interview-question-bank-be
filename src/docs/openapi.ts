@@ -9,7 +9,10 @@ export const openApiSpec = {
       'Shared, searchable bank of interview questions with client-restricted visibility.',
   },
   servers: [{ url: '/api/v1', description: 'Current host' }],
-  tags: [{ name: 'Health', description: 'Service status' }],
+  tags: [
+    { name: 'Health', description: 'Service status' },
+    { name: 'Auth', description: 'Registration, login and current user' },
+  ],
   paths: {
     '/health': {
       get: {
@@ -24,6 +27,63 @@ export const openApiSpec = {
               },
             },
           },
+        },
+      },
+    },
+    '/auth/register': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Register a new user (role USER)',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/RegisterRequest' } },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'User created',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthResult' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '409': {
+            description: 'Email already registered',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+        },
+      },
+    },
+    '/auth/login': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Log in and receive a JWT',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/LoginRequest' } },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Authenticated',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/AuthResult' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/auth/me': {
+      get: {
+        tags: ['Auth'],
+        summary: 'Current user with role permissions and client grants',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Current user',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Me' } } },
+          },
+          '401': { $ref: '#/components/responses/Unauthorized' },
         },
       },
     },
@@ -44,13 +104,88 @@ export const openApiSpec = {
       Error: {
         type: 'object',
         properties: {
-          success: { type: 'boolean', example: false },
-          message: { type: 'string' },
-          stack: { type: 'string', description: 'Development only' },
+          error: {
+            type: 'object',
+            properties: {
+              code: {
+                type: 'string',
+                enum: [
+                  'VALIDATION_ERROR',
+                  'UNAUTHENTICATED',
+                  'FORBIDDEN',
+                  'NOT_FOUND',
+                  'CONFLICT',
+                  'INTERNAL_ERROR',
+                ],
+              },
+              message: { type: 'string' },
+              details: { description: 'Validation issues, when present' },
+              stack: { type: 'string', description: 'Development only' },
+            },
+          },
+        },
+      },
+      RegisterRequest: {
+        type: 'object',
+        required: ['email', 'name', 'password'],
+        additionalProperties: false,
+        properties: {
+          email: { type: 'string', format: 'email' },
+          name: { type: 'string', maxLength: 100 },
+          password: { type: 'string', minLength: 8, maxLength: 72 },
+        },
+      },
+      LoginRequest: {
+        type: 'object',
+        required: ['email', 'password'],
+        additionalProperties: false,
+        properties: {
+          email: { type: 'string', format: 'email' },
+          password: { type: 'string' },
+        },
+      },
+      AuthUser: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          email: { type: 'string', format: 'email' },
+          name: { type: 'string' },
+          role: { type: 'string', enum: ['AUTHOR', 'REVIEWER', 'USER'] },
+        },
+      },
+      AuthResult: {
+        type: 'object',
+        properties: {
+          token: { type: 'string' },
+          user: { $ref: '#/components/schemas/AuthUser' },
+        },
+      },
+      Me: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          email: { type: 'string', format: 'email' },
+          name: { type: 'string' },
+          role: { type: 'string' },
+          permissions: { type: 'array', items: { type: 'string', example: 'question:read' } },
+          clients: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                name: { type: 'string' },
+              },
+            },
+          },
         },
       },
     },
     responses: {
+      ValidationError: {
+        description: 'Request body failed validation',
+        content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+      },
       Unauthorized: {
         description: 'Missing or invalid token',
         content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
