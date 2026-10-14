@@ -3,17 +3,17 @@ import type { Prisma } from '../generated/prisma/client.js';
 import type { AuthUser } from '../types/express.js';
 import { AppError } from '../utils/AppError.js';
 import { normalizeText } from '../utils/normalize.js';
-import type { CreateQuestionInput, ListQuestionsQuery } from '../validators/question.validators.js';
+import type {
+  CreateQuestionInput,
+  ListQuestionsQuery,
+  UpdateQuestionInput,
+} from '../validators/question.validators.js';
 
-export async function createQuestion(user: AuthUser, input: CreateQuestionInput) {
-  const clientId = input.clientId ?? null;
+type TagSelection = CreateQuestionInput['tags'];
 
-  // Same response as a nonexistent client, so it doesn't reveal which clients exist.
-  if (clientId && !user.clientIds.includes(clientId)) {
-    throw new AppError(404, 'NOT_FOUND', 'Client not found');
-  }
-
-  const requested = input.tags.flatMap(({ categoryId, tagIds }) =>
+// Loads the requested tags, requiring each to exist under the category it was submitted with.
+async function resolveTags(selection: TagSelection) {
+  const requested = selection.flatMap(({ categoryId, tagIds }) =>
     [...new Set(tagIds)].map((tagId) => ({ categoryId, tagId })),
   );
 
@@ -36,6 +36,19 @@ export async function createQuestion(user: AuthUser, input: CreateQuestionInput)
       })),
     );
   }
+
+  return found;
+}
+
+export async function createQuestion(user: AuthUser, input: CreateQuestionInput) {
+  const clientId = input.clientId ?? null;
+
+  // Same response as a nonexistent client, so it doesn't reveal which clients exist.
+  if (clientId && !user.clientIds.includes(clientId)) {
+    throw new AppError(404, 'NOT_FOUND', 'Client not found');
+  }
+
+  const found = await resolveTags(input.tags);
 
   //transaction because we want either both question and question history to be created or none of them
   const question = await prisma.$transaction(async (tx) => {
@@ -146,4 +159,93 @@ export async function listQuestions(
   });
 
   return { questions, page, limit, total };
+}
+
+export async function updateQuestion(user: AuthUser, id: string, input: UpdateQuestionInput) {
+  const canEditAny = user.permissions.includes('question:edit_any');
+  const canEditOwn = user.permissions.includes('question:edit_own');
+
+  // Invisible questions look the same as nonexistent ones.
+  const existing = await prisma.question.findFirst({
+    where: { AND: [{ id }, visibilityFilter(user)] },
+    include: { tags: true },
+  });
+  if (!existing) throw new AppError(404, 'NOT_FOUND', 'Question not found');
+
+  if (!canEditAny && !(canEditOwn && existing.authorId === user.id)) {
+    throw new AppError(403, 'FORBIDDEN', 'You can only edit your own questions');
+  }
+
+  const clientChanged = input.clientId !== undefined && (input.clientId ?? null) !== existing.clientId;
+  if (clientChanged && input.clientId) {
+    // Reviewers may assign any client; authors only clients they hold a grant on.
+    const allowed = canEditAny
+      ? (await prisma.client.count({ where: { id: input.clientId } })) > 0
+      : user.clientIds.includes(input.clientId);
+    if (!allowed) throw new AppError(404, 'NOT_FOUND', 'Client not found');
+  }
+
+  const found = input.tags ? await resolveTags(input.tags) : null;
+
+  const data: Prisma.QuestionUpdateInput = {};
+  const changes: Record<string, unknown> = {};
+  if (input.text !== undefined && input.text !== existing.text) {
+    data.text = input.text;
+    data.normalizedText = normalizeText(input.text);
+    changes.text = { from: existing.text, to: input.text };
+  }
+  if (input.answerNotes !== undefined && input.answerNotes !== existing.answerNotes) {
+    data.answerNotes = input.answerNotes;
+    changes.answerNotes = { from: existing.answerNotes, to: input.answerNotes };
+  }
+  if (clientChanged) {
+    const clientId = input.clientId ?? null;
+    data.client = clientId ? { connect: { id: clientId } } : { disconnect: true };
+    changes.clientId = { from: existing.clientId, to: clientId };
+  }
+
+  let tagsChanged = false;
+  if (found) {
+    const before = existing.tags.map((t) => t.tagId).sort((a, b) => a - b);
+    const after = found.map((t) => t.id).sort((a, b) => a - b);
+    tagsChanged = before.join() !== after.join();
+    if (tagsChanged) changes.tags = { from: before, to: after };
+  }
+
+  if (Object.keys(changes).length > 0) {
+    await prisma.$transaction(async (tx) => {
+      if (tagsChanged && found) {
+        await tx.questionTag.deleteMany({ where: { questionId: id } });
+        await tx.questionTag.createMany({
+          data: found.map((t) => ({ questionId: id, tagId: t.id, categoryId: t.categoryId })),
+        });
+      }
+      // Always issued so updatedAt moves even when only tags changed.
+      await tx.question.update({ where: { id }, data });
+      await tx.questionHistory.create({
+        data: { questionId: id, actorId: user.id, action: 'UPDATED', changes: changes as Prisma.InputJsonObject },
+      });
+    });
+  }
+
+  const q = await prisma.question.findUniqueOrThrow({
+    where: { id },
+    include: {
+      client: { select: { id: true, name: true } },
+      tags: { include: { tag: { include: { category: true } } } },
+    },
+  });
+  const tags: Record<string, string[]> = {};
+  for (const { tag } of q.tags) (tags[tag.category.slug] ??= []).push(tag.slug);
+
+  return {
+    id: q.id,
+    text: q.text,
+    answerNotes: q.answerNotes,
+    client: q.client,
+    tags,
+    authorId: q.authorId,
+    createdAt: q.createdAt,
+    updatedAt: q.updatedAt,
+  };
 }

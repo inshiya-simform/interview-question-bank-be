@@ -1,6 +1,6 @@
 import type { RequestHandler } from 'express';
 import * as questionService from '../services/question.service.js';
-import { listQuestionsQuerySchema } from '../validators/question.validators.js';
+import { listQuestionsQuerySchema, questionIdParamSchema } from '../validators/question.validators.js';
 
 export const createQuestion: RequestHandler = async (req, res, next) => {
   try {
@@ -14,6 +14,15 @@ export const listQuestions: RequestHandler = async (req, res, next) => {
   try {
     const query = listQuestionsQuerySchema.parse(req.query);
     res.json(await questionService.listQuestions(req.user!, query));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateQuestion: RequestHandler = async (req, res, next) => {
+  try {
+    const { id } = questionIdParamSchema.parse(req.params);
+    res.json(await questionService.updateQuestion(req.user!, id, req.body));
   } catch (err) {
     next(err);
   }
