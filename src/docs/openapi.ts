@@ -12,6 +12,7 @@ export const openApiSpec = {
   tags: [
     { name: 'Health', description: 'Service status' },
     { name: 'Auth', description: 'Registration, login and current user' },
+    { name: 'Clients', description: 'Clients the caller may access' },
     { name: 'Questions', description: 'Interview questions' },
   ],
   paths: {
@@ -83,6 +84,38 @@ export const openApiSpec = {
           '200': {
             description: 'Current user',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Me' } } },
+          },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/clients': {
+      get: {
+        tags: ['Clients'],
+        summary: 'List clients the current user is permitted to access',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Permitted clients, sorted by name',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    clients: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string', format: 'uuid' },
+                          name: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
           },
           '401': { $ref: '#/components/responses/Unauthorized' },
         },
