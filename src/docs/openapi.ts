@@ -167,6 +167,42 @@ export const openApiSpec = {
       },
     },
     '/questions': {
+      get: {
+        tags: ['Questions'],
+        summary: 'List questions the current user may see (requires question:read)',
+        description:
+          'USER: questions with no client or a client they hold a grant on. AUTHOR: the same plus their own questions. REVIEWER: all questions.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+          { name: 'clientId', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Only questions of this client' },
+          { name: 'tags', in: 'query', schema: { type: 'string', example: '1,2' }, description: 'Comma-separated tag ids; matches questions with any of them' },
+          { name: 'categories', in: 'query', schema: { type: 'string', example: '1,3' }, description: 'Comma-separated category ids; matches questions with a tag in any of them' },
+          { name: 'search', in: 'query', schema: { type: 'string', maxLength: 200 }, description: 'Full-text search over question text and answer notes' },
+        ],
+        responses: {
+          '200': {
+            description: 'Visible questions, newest first',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    questions: { type: 'array', items: { $ref: '#/components/schemas/Question' } },
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    total: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+        },
+      },
       post: {
         tags: ['Questions'],
         summary: 'Create a question (requires question:create)',
