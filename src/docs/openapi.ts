@@ -13,6 +13,7 @@ export const openApiSpec = {
     { name: 'Health', description: 'Service status' },
     { name: 'Auth', description: 'Registration, login and current user' },
     { name: 'Clients', description: 'Clients the caller may access' },
+    { name: 'Tags', description: 'Tag categories and their tags' },
     { name: 'Questions', description: 'Interview questions' },
   ],
   paths: {
@@ -109,6 +110,50 @@ export const openApiSpec = {
                         properties: {
                           id: { type: 'string', format: 'uuid' },
                           name: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/tags': {
+      get: {
+        tags: ['Tags'],
+        summary: 'List all tag categories with their tags',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Categories sorted by name, each with its tags sorted by name',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    categories: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'integer' },
+                          slug: { type: 'string', example: 'technology' },
+                          name: { type: 'string' },
+                          tags: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                id: { type: 'integer' },
+                                slug: { type: 'string' },
+                                name: { type: 'string' },
+                              },
+                            },
+                          },
                         },
                       },
                     },
