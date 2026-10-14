@@ -1,8 +1,9 @@
 import { prisma } from '../db/prisma.js';
+import type { Prisma } from '../generated/prisma/client.js';
 import type { AuthUser } from '../types/express.js';
 import { AppError } from '../utils/AppError.js';
 import { normalizeText } from '../utils/normalize.js';
-import type { CreateQuestionInput } from '../validators/question.validators.js';
+import type { CreateQuestionInput, ListQuestionsQuery } from '../validators/question.validators.js';
 
 export async function createQuestion(user: AuthUser, input: CreateQuestionInput) {
   const clientId = input.clientId ?? null;
@@ -80,4 +81,69 @@ export async function createQuestion(user: AuthUser, input: CreateQuestionInput)
     createdAt: question.createdAt,
     updatedAt: question.updatedAt,
   };
+}
+
+// Reviewers (edit_any) see everything. Everyone else sees unrestricted questions
+// plus those of clients they hold a grant on; authors (edit_own) also see their own.
+function visibilityFilter(user: AuthUser): Prisma.QuestionWhereInput {
+  if (user.permissions.includes('question:edit_any')) return {};
+
+  const visible: Prisma.QuestionWhereInput[] = [
+    { clientId: null },
+    { clientId: { in: user.clientIds } },
+  ];
+  if (user.permissions.includes('question:edit_own')) visible.push({ authorId: user.id });
+  return { OR: visible };
+}
+
+export async function listQuestions(
+  user: AuthUser,
+  { page, limit, clientId, tags, categories, search }: ListQuestionsQuery,
+) {
+  const filters: Prisma.QuestionWhereInput[] = [visibilityFilter(user)];
+
+  // Filters narrow the visible set; they can never widen it.
+  if (clientId) filters.push({ clientId });
+  if (tags) filters.push({ tags: { some: { tagId: { in: tags } } } });
+  if (categories) filters.push({ tags: { some: { categoryId: { in: categories } } } });
+
+  if (search) {
+    const matches = await prisma.$queryRaw<{ id: string }[]>`
+      SELECT "id" FROM "Question"
+      WHERE "searchVector" @@ websearch_to_tsquery('english', ${search})`;
+    filters.push({ id: { in: matches.map((m) => m.id) } });
+  }
+
+  const where: Prisma.QuestionWhereInput = { AND: filters };
+
+  const [total, rows] = await prisma.$transaction([
+    prisma.question.count({ where }),
+    prisma.question.findMany({
+      where,
+      include: {
+        client: { select: { id: true, name: true } },
+        tags: { include: { tag: { include: { category: true } } } },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+  ]);
+
+  const questions = rows.map((q) => {
+    const tags: Record<string, string[]> = {};
+    for (const { tag } of q.tags) (tags[tag.category.slug] ??= []).push(tag.slug);
+    return {
+      id: q.id,
+      text: q.text,
+      answerNotes: q.answerNotes,
+      client: q.client,
+      tags,
+      authorId: q.authorId,
+      createdAt: q.createdAt,
+      updatedAt: q.updatedAt,
+    };
+  });
+
+  return { questions, page, limit, total };
 }

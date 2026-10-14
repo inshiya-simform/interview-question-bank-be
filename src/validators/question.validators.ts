@@ -29,3 +29,22 @@ export const createQuestionSchema = z
   .strict();
 
 export type CreateQuestionInput = z.infer<typeof createQuestionSchema>;
+
+// "1,2,3" -> [1, 2, 3]
+const idList = z
+  .string()
+  .transform((v) => v.split(',').map((x) => Number(x.trim())))
+  .pipe(z.array(z.number().int().positive()).min(1).max(50));
+
+export const listQuestionsQuerySchema = z
+  .object({
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    clientId: z.uuid().optional(),
+    tags: idList.optional(), // matches questions having ANY of these tag ids
+    categories: idList.optional(), // matches questions having a tag in ANY of these categories
+    search: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict();
+
+export type ListQuestionsQuery = z.infer<typeof listQuestionsQuerySchema>;
