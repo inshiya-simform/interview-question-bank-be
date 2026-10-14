@@ -229,6 +229,37 @@ export const openApiSpec = {
           '403': { $ref: '#/components/responses/Forbidden' },
         },
       },
+      post: {
+        tags: ['Admin'],
+        summary: 'Create a client (SUPER_ADMIN)',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['name'],
+                additionalProperties: false,
+                properties: { name: { type: 'string', minLength: 1, maxLength: 100 } },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Client created (no users yet)',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ClientAccess' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '409': {
+            description: 'Client name already exists',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+        },
+      },
     },
     '/admin/clients/{clientId}/users': {
       post: {

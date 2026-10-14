@@ -24,9 +24,12 @@ export const grantClientAccessSchema = z
   .object({ email: z.string().trim().toLowerCase().pipe(z.email()) })
   .strict();
 
+export const createClientSchema = z.object({ name: z.string().trim().min(1).max(100) }).strict();
+
 export const clientIdParamSchema = z.object({ clientId: z.uuid() });
 export const clientUserParamSchema = z.object({ clientId: z.uuid(), userId: z.uuid() });
 
 export type CreateStaffInput = z.infer<typeof createStaffSchema>;
+export type CreateClientInput = z.infer<typeof createClientSchema>;
 export type ListClientAccessQuery = z.infer<typeof listClientAccessQuerySchema>;
 export type GrantClientAccessInput = z.infer<typeof grantClientAccessSchema>;

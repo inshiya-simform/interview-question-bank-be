@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  createClient,
   createStaff,
   grantClientAccess,
   listClientAccess,
@@ -9,7 +10,7 @@ import {
 import { authenticate } from '../middlewares/authenticate.js';
 import { requirePermission } from '../middlewares/requirePermission.js';
 import { validate } from '../middlewares/validate.js';
-import { createStaffSchema, grantClientAccessSchema } from '../validators/admin.validators.js';
+import { createClientSchema, createStaffSchema, grantClientAccessSchema } from '../validators/admin.validators.js';
 
 const router = Router();
 
@@ -21,6 +22,7 @@ router.post('/users', requirePermission('user:create_staff'), validate(createSta
 
 // Client access page
 router.get('/clients', requirePermission('client:read_all'), listClientAccess);
+router.post('/clients', requirePermission('client:create'), validate(createClientSchema), createClient);
 router.post(
   '/clients/:clientId/users',
   requirePermission('client:assign'),

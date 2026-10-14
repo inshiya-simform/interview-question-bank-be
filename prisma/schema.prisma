@@ -25,7 +25,7 @@ model Role {
 
 model Permission {
   id   Int    @id @default(autoincrement())
-  code String @unique // question:read | question:create | question:edit_own | question:edit_any | user:read | user:create_staff | client:read_all | client:assign
+  code String @unique // question:read | question:create | question:edit_own | question:edit_any | user:read | user:create_staff | client:read_all | client:create | client:assign
 
   roles RolePermission[]
 }

@@ -22,6 +22,14 @@ export const createStaff: RequestHandler = async (req, res, next) => {
   }
 };
 
+export const createClient: RequestHandler = async (req, res, next) => {
+  try {
+    res.status(201).json(await adminService.createClient(req.body));
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const listClientAccess: RequestHandler = async (req, res, next) => {
   try {
     res.json(await adminService.listClientAccess(listClientAccessQuerySchema.parse(req.query)));

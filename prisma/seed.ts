@@ -21,7 +21,7 @@ const rolePermissions: Record<string, string[]> = {
   AUTHOR: ['question:read', 'question:create', 'question:edit_own'],
   REVIEWER: ['question:read', 'question:edit_any'],
   USER: ['question:read'],
-  SUPER_ADMIN: ['user:read', 'user:create_staff', 'client:read_all', 'client:assign'],
+  SUPER_ADMIN: ['user:read', 'user:create_staff', 'client:read_all', 'client:create', 'client:assign'],
 };
 
 async function main() {

@@ -3,6 +3,7 @@ import { Prisma } from '../generated/prisma/client.js';
 import { AppError } from '../utils/AppError.js';
 import { hashPassword } from '../utils/password.js';
 import type {
+  CreateClientInput,
   CreateStaffInput,
   GrantClientAccessInput,
   ListClientAccessQuery,
@@ -72,6 +73,17 @@ export async function listClientAccess({ page, limit, search }: ListClientAccess
     }),
   ]);
   return { clients: rows.map(toClientAccessDto), page, limit, total };
+}
+
+export async function createClient({ name }: CreateClientInput) {
+  try {
+    return toClientAccessDto(await prisma.client.create({ data: { name }, select: clientAccessSelect }));
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      throw new AppError(409, 'CONFLICT', 'A client with that name already exists');
+    }
+    throw err;
+  }
 }
 
 async function loadClientAccess(clientId: string) {
