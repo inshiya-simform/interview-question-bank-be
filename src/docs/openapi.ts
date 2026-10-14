@@ -12,6 +12,9 @@ export const openApiSpec = {
   tags: [
     { name: 'Health', description: 'Service status' },
     { name: 'Auth', description: 'Registration, login and current user' },
+    { name: 'Clients', description: 'Clients the caller may access' },
+    { name: 'Tags', description: 'Tag categories and their tags' },
+    { name: 'Questions', description: 'Interview questions' },
   ],
   paths: {
     '/health': {
@@ -87,6 +90,105 @@ export const openApiSpec = {
         },
       },
     },
+    '/clients': {
+      get: {
+        tags: ['Clients'],
+        summary: 'List clients the current user is permitted to access',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Permitted clients, sorted by name',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    clients: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string', format: 'uuid' },
+                          name: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/tags': {
+      get: {
+        tags: ['Tags'],
+        summary: 'List all tag categories with their tags',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Categories sorted by name, each with its tags sorted by name',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    categories: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'integer' },
+                          slug: { type: 'string', example: 'technology' },
+                          name: { type: 'string' },
+                          tags: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              properties: {
+                                id: { type: 'integer' },
+                                slug: { type: 'string' },
+                                name: { type: 'string' },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/questions': {
+      post: {
+        tags: ['Questions'],
+        summary: 'Create a question (requires question:create)',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/CreateQuestionRequest' } },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Question created',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Question' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
@@ -158,6 +260,64 @@ export const openApiSpec = {
         properties: {
           token: { type: 'string' },
           user: { $ref: '#/components/schemas/AuthUser' },
+        },
+      },
+      CreateQuestionRequest: {
+        type: 'object',
+        required: ['text', 'answerNotes', 'tags'],
+        additionalProperties: false,
+        properties: {
+          text: { type: 'string', minLength: 1, maxLength: 2000 },
+          answerNotes: { type: 'string', maxLength: 10000 },
+          clientId: {
+            type: 'string',
+            format: 'uuid',
+            nullable: true,
+            description: 'Caller must hold a grant on this client',
+          },
+          tags: {
+            type: 'array',
+            minItems: 1,
+            description: 'Tag ids grouped by category id; each categoryId at most once',
+            items: {
+              type: 'object',
+              required: ['categoryId', 'tagIds'],
+              additionalProperties: false,
+              properties: {
+                categoryId: { type: 'integer', minimum: 1 },
+                tagIds: { type: 'array', minItems: 1, items: { type: 'integer', minimum: 1 } },
+              },
+            },
+            example: [
+              { categoryId: 1, tagIds: [1, 2] },
+              { categoryId: 2, tagIds: [5] },
+            ],
+          },
+          confirmDistinct: { type: 'boolean', description: 'Reserved for duplicate detection' },
+          distinctReason: { type: 'string', description: 'Reserved for duplicate detection' },
+        },
+      },
+      Question: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          text: { type: 'string' },
+          answerNotes: { type: 'string' },
+          client: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              id: { type: 'string', format: 'uuid' },
+              name: { type: 'string' },
+            },
+          },
+          tags: {
+            type: 'object',
+            additionalProperties: { type: 'array', items: { type: 'string' } },
+          },
+          authorId: { type: 'string', format: 'uuid' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
         },
       },
       Me: {
