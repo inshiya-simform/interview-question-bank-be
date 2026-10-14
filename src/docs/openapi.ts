@@ -13,6 +13,7 @@ export const openApiSpec = {
     { name: 'Health', description: 'Service status' },
     { name: 'Auth', description: 'Registration, login and current user' },
     { name: 'Clients', description: 'Clients the caller may access' },
+    { name: 'Admin', description: 'Super admin: staff accounts and client access' },
     { name: 'Tags', description: 'Tag categories and their tags' },
     { name: 'Questions', description: 'Interview questions' },
   ],
@@ -144,6 +145,142 @@ export const openApiSpec = {
             },
           },
           '401': { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/admin/users': {
+      get: {
+        tags: ['Admin'],
+        summary: 'List all users with role and client grants (SUPER_ADMIN)',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'All users, newest first',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    users: { type: 'array', items: { $ref: '#/components/schemas/AdminUser' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+        },
+      },
+      post: {
+        tags: ['Admin'],
+        summary: 'Create an author or reviewer with the default password (SUPER_ADMIN)',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/CreateStaffRequest' } },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'User created; password is the default and is never returned',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/AdminUser' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '409': {
+            description: 'Email already registered',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+        },
+      },
+    },
+    '/admin/clients': {
+      get: {
+        tags: ['Admin'],
+        summary: 'Clients with the users who have access, paginated (SUPER_ADMIN)',
+        description: 'Drives the Client access page. `search` matches client name or the email of a user with access.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+          { name: 'search', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Clients sorted by name',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    clients: { type: 'array', items: { $ref: '#/components/schemas/ClientAccess' } },
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    total: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+        },
+      },
+    },
+    '/admin/clients/{clientId}/users': {
+      post: {
+        tags: ['Admin'],
+        summary: 'Give a user (by email) access to a client (SUPER_ADMIN)',
+        description: 'Idempotent. Returns the client with its updated user list.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'clientId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['email'],
+                additionalProperties: false,
+                properties: { email: { type: 'string', format: 'email' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated client',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ClientAccess' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
+    '/admin/clients/{clientId}/users/{userId}': {
+      delete: {
+        tags: ['Admin'],
+        summary: "Remove a user's access to a client (SUPER_ADMIN)",
+        description: 'Idempotent. Returns the client with its updated user list.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'clientId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          { name: 'userId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Updated client',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ClientAccess' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
         },
       },
     },
@@ -440,6 +577,55 @@ export const openApiSpec = {
           authorId: { type: 'string', format: 'uuid' },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      CreateStaffRequest: {
+        type: 'object',
+        required: ['email', 'role'],
+        additionalProperties: false,
+        properties: {
+          email: { type: 'string', format: 'email' },
+          name: { type: 'string', minLength: 1, maxLength: 100, description: "Defaults to the email's local part" },
+          role: { type: 'string', enum: ['AUTHOR', 'REVIEWER'] },
+        },
+      },
+      ClientAccess: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          name: { type: 'string' },
+          userCount: { type: 'integer' },
+          users: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                email: { type: 'string', format: 'email' },
+                name: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+      AdminUser: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          email: { type: 'string', format: 'email' },
+          name: { type: 'string' },
+          role: { type: 'string', example: 'AUTHOR' },
+          createdAt: { type: 'string', format: 'date-time' },
+          clients: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                name: { type: 'string' },
+              },
+            },
+          },
         },
       },
       Me: {
