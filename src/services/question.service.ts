@@ -249,3 +249,29 @@ export async function updateQuestion(user: AuthUser, id: string, input: UpdateQu
     updatedAt: q.updatedAt,
   };
 }
+
+export async function getQuestion(user: AuthUser, id: string) {
+  // Invisible questions look the same as nonexistent ones.
+  const q = await prisma.question.findFirst({
+    where: { AND: [{ id }, visibilityFilter(user)] },
+    include: {
+      client: { select: { id: true, name: true } },
+      tags: { include: { tag: { include: { category: true } } } },
+    },
+  });
+  if (!q) throw new AppError(404, 'NOT_FOUND', 'Question not found');
+
+  const tags: Record<string, string[]> = {};
+  for (const { tag } of q.tags) (tags[tag.category.slug] ??= []).push(tag.slug);
+
+  return {
+    id: q.id,
+    text: q.text,
+    answerNotes: q.answerNotes,
+    client: q.client,
+    tags,
+    authorId: q.authorId,
+    createdAt: q.createdAt,
+    updatedAt: q.updatedAt,
+  };
+}

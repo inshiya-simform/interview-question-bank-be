@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createQuestion, listQuestions, updateQuestion } from '../controllers/question.controller.js';
+import { createQuestion, getQuestion, listQuestions, updateQuestion } from '../controllers/question.controller.js';
 import { authenticate } from '../middlewares/authenticate.js';
 import { requireAnyPermission, requirePermission } from '../middlewares/requirePermission.js';
 import { validate } from '../middlewares/validate.js';
@@ -10,6 +10,7 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/', requirePermission('question:read'), listQuestions);
+router.get('/:id', requirePermission('question:read'), getQuestion);
 router.post('/', requirePermission('question:create'), validate(createQuestionSchema), createQuestion);
 router.patch(
   '/:id',

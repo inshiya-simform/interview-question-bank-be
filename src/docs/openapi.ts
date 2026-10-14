@@ -226,6 +226,24 @@ export const openApiSpec = {
       },
     },
     '/questions/{id}': {
+      get: {
+        tags: ['Questions'],
+        summary: 'Get a question by id (requires question:read)',
+        description:
+          'Same visibility rules as the list endpoint. A question the user cannot see returns 404.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': {
+            description: 'Question details',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Question' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
       patch: {
         tags: ['Questions'],
         summary: 'Edit a question (requires question:edit_own or question:edit_any)',

@@ -27,3 +27,12 @@ export const updateQuestion: RequestHandler = async (req, res, next) => {
     next(err);
   }
 };
+
+export const getQuestion: RequestHandler = async (req, res, next) => {
+  try {
+    const { id } = questionIdParamSchema.parse(req.params);
+    res.json(await questionService.getQuestion(req.user!, id));
+  } catch (err) {
+    next(err);
+  }
+};
