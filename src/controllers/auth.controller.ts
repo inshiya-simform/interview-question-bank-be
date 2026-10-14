@@ -24,3 +24,8 @@ export const me: RequestHandler = async (req, res, next) => {
     next(err);
   }
 };
+
+export const myPermissions: RequestHandler = (req, res) => {
+  const { role, permissions, clientIds } = req.user!;
+  res.json({ role, permissions, clientIds });
+};

@@ -90,6 +90,31 @@ export const openApiSpec = {
         },
       },
     },
+    '/auth/permissions': {
+      get: {
+        tags: ['Auth'],
+        summary: 'Permissions of the current user, for toggling UI elements',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Role, permission codes and permitted client ids',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    role: { type: 'string', example: 'USER' },
+                    permissions: { type: 'array', items: { type: 'string', example: 'question:read' } },
+                    clientIds: { type: 'array', items: { type: 'string', format: 'uuid' } },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
     '/clients': {
       get: {
         tags: ['Clients'],
