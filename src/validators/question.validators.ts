@@ -28,6 +28,15 @@ export const createQuestionSchema = z
   })
   .strict();
 
+// Partial update: omitted fields are unchanged; tags, when present, replace the full set.
+export const updateQuestionSchema = createQuestionSchema
+  .omit({ confirmDistinct: true, distinctReason: true })
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, 'At least one field must be provided');
+
+export const questionIdParamSchema = z.object({ id: z.uuid() });
+
+export type UpdateQuestionInput = z.infer<typeof updateQuestionSchema>;
 export type CreateQuestionInput = z.infer<typeof createQuestionSchema>;
 
 // "1,2,3" -> [1, 2, 3]

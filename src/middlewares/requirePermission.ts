@@ -10,3 +10,13 @@ export const requirePermission =
     }
     next();
   };
+
+export const requireAnyPermission =
+  (...codes: string[]): RequestHandler =>
+  (req, _res, next) => {
+    if (!req.user) return next(new AppError(401, 'UNAUTHENTICATED', 'Authentication required'));
+    if (!codes.some((c) => req.user!.permissions.includes(c))) {
+      return next(new AppError(403, 'FORBIDDEN', `Missing permission: one of ${codes.join(', ')}`));
+    }
+    next();
+  };

@@ -225,6 +225,50 @@ export const openApiSpec = {
         },
       },
     },
+    '/questions/{id}': {
+      get: {
+        tags: ['Questions'],
+        summary: 'Get a question by id (requires question:read)',
+        description:
+          'Same visibility rules as the list endpoint. A question the user cannot see returns 404.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': {
+            description: 'Question details',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Question' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+      patch: {
+        tags: ['Questions'],
+        summary: 'Edit a question (requires question:edit_own or question:edit_any)',
+        description:
+          'AUTHOR: only their own questions. REVIEWER: any question. Omitted fields are unchanged; `tags`, when sent, replaces the full tag set. Changes are recorded in question history.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/UpdateQuestionRequest' } },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated question',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Question' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
@@ -331,6 +375,23 @@ export const openApiSpec = {
           },
           confirmDistinct: { type: 'boolean', description: 'Reserved for duplicate detection' },
           distinctReason: { type: 'string', description: 'Reserved for duplicate detection' },
+        },
+      },
+      UpdateQuestionRequest: {
+        type: 'object',
+        minProperties: 1,
+        additionalProperties: false,
+        description: 'Same fields as CreateQuestionRequest, all optional, at least one required',
+        properties: {
+          text: { type: 'string', minLength: 1, maxLength: 2000 },
+          answerNotes: { type: 'string', maxLength: 10000 },
+          clientId: {
+            type: 'string',
+            format: 'uuid',
+            nullable: true,
+            description: 'Authors need a grant on the client; reviewers may use any client. null makes it unrestricted',
+          },
+          tags: { $ref: '#/components/schemas/CreateQuestionRequest/properties/tags' },
         },
       },
       Question: {
