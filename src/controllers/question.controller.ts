@@ -10,6 +10,14 @@ export const createQuestion: RequestHandler = async (req, res, next) => {
   }
 };
 
+export const checkDuplicate: RequestHandler = async (req, res, next) => {
+  try {
+    res.json(await questionService.checkDuplicate(req.user!, req.body));
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const listQuestions: RequestHandler = async (req, res, next) => {
   try {
     const query = listQuestionsQuerySchema.parse(req.query);

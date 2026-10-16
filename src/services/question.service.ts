@@ -1,9 +1,11 @@
+import { env } from '../config/env.js';
 import { prisma } from '../db/prisma.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { AuthUser } from '../types/express.js';
 import { AppError } from '../utils/AppError.js';
 import { normalizeText } from '../utils/normalize.js';
 import type {
+  CheckDuplicateInput,
   CreateQuestionInput,
   ListQuestionsQuery,
   UpdateQuestionInput,
@@ -40,6 +42,44 @@ async function resolveTags(selection: TagSelection) {
   return found;
 }
 
+const MAX_DUPLICATE_MATCHES = 5;
+const DUPLICATE_CANDIDATES = 50;
+
+// Compares against questions the user can see only, so a match never reveals a hidden question.
+export async function findDuplicates(user: AuthUser, text: string) {
+  const normalized = normalizeText(text);
+  if (!normalized) return [];
+  const threshold = env.duplicateSimilarityThreshold;
+
+  // `%` uses the trigram index; its threshold is set for this transaction only.
+  const [, candidates] = await prisma.$transaction([
+    prisma.$executeRaw`SELECT set_config('pg_trgm.similarity_threshold', ${String(threshold)}, true)`,
+    prisma.$queryRaw<{ id: string; similarity: number }[]>`
+      SELECT "id", similarity("normalizedText", ${normalized}) AS "similarity"
+      FROM "Question"
+      WHERE "normalizedText" = ${normalized} OR "normalizedText" % ${normalized}
+      ORDER BY "similarity" DESC
+      LIMIT ${DUPLICATE_CANDIDATES}`,
+  ]);
+  if (candidates.length === 0) return [];
+
+  const visible = await prisma.question.findMany({
+    where: { AND: [{ id: { in: candidates.map((c) => c.id) } }, visibilityFilter(user)] },
+    select: { id: true, text: true },
+  });
+  const byId = new Map(visible.map((q) => [q.id, q.text]));
+
+  return candidates
+    .filter((c) => byId.has(c.id))
+    .slice(0, MAX_DUPLICATE_MATCHES)
+    .map((c) => ({ id: c.id, text: byId.get(c.id)!, similarity: Math.round(c.similarity * 100) / 100 }));
+}
+
+export async function checkDuplicate(user: AuthUser, { text }: CheckDuplicateInput) {
+  const matches = await findDuplicates(user, text);
+  return { isDuplicate: matches.length > 0, matches };
+}
+
 export async function createQuestion(user: AuthUser, input: CreateQuestionInput) {
   const clientId = input.clientId ?? null;
 
@@ -49,6 +89,24 @@ export async function createQuestion(user: AuthUser, input: CreateQuestionInput)
   }
 
   const found = await resolveTags(input.tags);
+
+  // Near-duplicates are surfaced, not silently stored; the author may override by
+  // confirming the question is genuinely different and saying why.
+  const duplicates = await findDuplicates(user, input.text);
+  let duplicateOverride: { matchedIds: string[]; reason: string } | undefined;
+  if (duplicates.length > 0) {
+    if (!input.confirmDistinct) {
+      console.info(JSON.stringify({ event: 'duplicate_rejected', userId: user.id, matchedIds: duplicates.map((d) => d.id) }));
+      throw new AppError(409, 'DUPLICATE_SUSPECTED', 'This question looks like an existing one', { matches: duplicates });
+    }
+    if (!input.distinctReason) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'distinctReason is required when confirmDistinct is true', [
+        { path: ['distinctReason'], message: 'Explain how this question differs from the matches' },
+      ]);
+    }
+    duplicateOverride = { matchedIds: duplicates.map((d) => d.id), reason: input.distinctReason };
+    console.info(JSON.stringify({ event: 'duplicate_overridden', userId: user.id, ...duplicateOverride }));
+  }
 
   //transaction because we want either both question and question history to be created or none of them
   const question = await prisma.$transaction(async (tx) => {
@@ -74,6 +132,7 @@ export async function createQuestion(user: AuthUser, input: CreateQuestionInput)
           answerNotes: input.answerNotes,
           clientId,
           tags: input.tags.map(({ categoryId, tagIds }) => ({ categoryId, tagIds })),
+          ...(duplicateOverride && { duplicateOverride }),
         },
       },
     });

@@ -415,6 +415,62 @@ export const openApiSpec = {
           '401': { $ref: '#/components/responses/Unauthorized' },
           '403': { $ref: '#/components/responses/Forbidden' },
           '404': { $ref: '#/components/responses/NotFound' },
+          '409': {
+            description:
+              'DUPLICATE_SUSPECTED: the text is similar to existing visible questions. Resubmit with confirmDistinct: true and a distinctReason to store it anyway. Body: error.details.matches.',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+        },
+      },
+    },
+    '/questions/check-duplicate': {
+      post: {
+        tags: ['Questions'],
+        summary: 'Check whether question text duplicates an existing one (requires question:create)',
+        description:
+          'Dry run: stores nothing. Compares only against questions the user can see. Call while the user types, then show the matches and let them mark the question as genuinely different (confirmDistinct on POST /questions).',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['text'],
+                additionalProperties: false,
+                properties: { text: { type: 'string', minLength: 1, maxLength: 2000 } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Up to 5 similar visible questions, most similar first',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    isDuplicate: { type: 'boolean' },
+                    matches: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string', format: 'uuid' },
+                          text: { type: 'string' },
+                          similarity: { type: 'number', minimum: 0, maximum: 1, example: 0.86 },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
         },
       },
     },
@@ -566,8 +622,8 @@ export const openApiSpec = {
               { categoryId: 2, tagIds: [5] },
             ],
           },
-          confirmDistinct: { type: 'boolean', description: 'Reserved for duplicate detection' },
-          distinctReason: { type: 'string', description: 'Reserved for duplicate detection' },
+          confirmDistinct: { type: 'boolean', description: 'Store the question even though it matched a suspected duplicate' },
+          distinctReason: { type: 'string', description: 'Required when confirmDistinct is true: how this question differs' },
         },
       },
       UpdateQuestionRequest: {

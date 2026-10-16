@@ -13,4 +13,5 @@ export const env = {
   databaseUrl: required('DATABASE_URL'),
   jwtSecret: required('JWT_SECRET'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '1d',
+  duplicateSimilarityThreshold: Number(process.env.DUPLICATE_SIMILARITY_THRESHOLD ?? 0.8),
 } as const;
