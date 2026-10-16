@@ -22,7 +22,7 @@ export const createQuestionSchema = z
         (tags) => new Set(tags.map((t) => t.categoryId)).size === tags.length,
         'Each categoryId may appear only once',
       ),
-    // Accepted now so the contract is stable; duplicate detection arrives in a later step.
+    // Set confirmDistinct (with a distinctReason) to store a question flagged as a suspected duplicate.
     confirmDistinct: z.boolean().optional(),
     distinctReason: z.string().trim().max(1000).optional(),
   })
@@ -34,9 +34,12 @@ export const updateQuestionSchema = createQuestionSchema
   .partial()
   .refine((v) => Object.keys(v).length > 0, 'At least one field must be provided');
 
+export const checkDuplicateSchema = z.object({ text: createQuestionSchema.shape.text }).strict();
+
 export const questionIdParamSchema = z.object({ id: z.uuid() });
 
 export type UpdateQuestionInput = z.infer<typeof updateQuestionSchema>;
+export type CheckDuplicateInput = z.infer<typeof checkDuplicateSchema>;
 export type CreateQuestionInput = z.infer<typeof createQuestionSchema>;
 
 // "1,2,3" -> [1, 2, 3]

@@ -4,6 +4,7 @@ export type ErrorCode =
   | 'FORBIDDEN'
   | 'NOT_FOUND'
   | 'CONFLICT'
+  | 'DUPLICATE_SUSPECTED'
   | 'INTERNAL_ERROR';
 
 export class AppError extends Error {
