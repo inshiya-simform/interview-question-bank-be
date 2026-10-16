@@ -119,7 +119,7 @@ export const openApiSpec = {
     '/clients': {
       get: {
         tags: ['Clients'],
-        summary: 'List clients the current user is permitted to access',
+        summary: 'List clients the current user is permitted to access (all clients for a REVIEWER)',
         security: [{ bearerAuth: [] }],
         responses: {
           '200': {
