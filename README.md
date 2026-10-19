@@ -1,6 +1,6 @@
 # Interview Question Bank — Backend
 
-Shared, searchable bank of interview/screening questions. Anyone can browse questions they're permitted to see; users add and edit their own; reviewers edit anything; questions tied to a client are visible only to users granted access to that client.
+Shared, searchable bank of interview/screening questions. Anyone can browse questions they're permitted to see; users add and edit their own; reviewers approve, reject or send back questions before they go live; questions tied to a client are visible only to users granted access to that client.
 
 **Stack:** Node.js · Express 5 · TypeScript · Prisma · PostgreSQL · Docker Compose
 
@@ -14,14 +14,26 @@ Roles and permissions are rows, not code. A role is a named set of permission co
 
 | Role | Permissions |
 |---|---|
-| `REVIEWER` | `question:read`, `question:edit_any` (cannot add) |
+| `REVIEWER` | `question:read`, `question:review` (cannot add or edit) |
 | `USER` | `question:read`, `question:create`, `question:edit_own` |
 
-Edit rule: `question:edit_any`, or `question:edit_own` and `question.authorId === user.id`. Routes are gated with `requirePermission('<code>')`.
+Edit rule: `question:edit_own` and `question.authorId === user.id`. Reviewers do not edit; they act through the review endpoints. Routes are gated with `requirePermission('<code>')`.
 
 **Client permission** (`ClientPermission`): grants one user visibility into one client's questions. Independent of role — a Reviewer without a grant still cannot see a client's questions.
 
-A question is **visible** to user `U` iff `question.clientId IS NULL` OR a `ClientPermission(U, question.clientId)` exists.
+A question is **visible** to user `U` iff it has been approved (`publishedAt IS NOT NULL`) AND (`question.clientId IS NULL` OR a `ClientPermission(U, question.clientId)` exists). Authors always see their own questions, and holders of `question:review` see every question in any status.
+
+### Review workflow
+
+Statuses: `PENDING_REVIEW`, `APPROVED`, `CHANGES_REQUESTED`, `REJECTED`.
+
+- A new question is `PENDING_REVIEW` and visible only to its author and reviewers. Any reviewer may approve it, after which it is live for everyone with access.
+- Editing an approved question does not change the live version. The edit is stored as a draft (`QuestionDraft`) and the question goes back to `PENDING_REVIEW`. Other users keep seeing the last approved text until a reviewer approves the draft.
+- A reviewer can **request changes** (status `CHANGES_REQUESTED`, with a required note). When the author edits, the question automatically returns to `PENDING_REVIEW`.
+- A reviewer can **reject** (the reason is optional). A never-approved question becomes `REJECTED` and can no longer be edited. Rejecting a pending edit of an approved question discards the draft; the live version stays and the status returns to `APPROVED` with the reason in `reviewNote`.
+- Review state (`status`, `reviewNote`, `reviewedBy`, `reviewedAt`, `hasDraft`, `draft`) is shown only to the author and reviewers. Everyone else sees approved questions with status `APPROVED`.
+- UI queries: the **Questions** tab is `GET /questions` (live, approved questions only, for every role). The author's **My submissions** tab and the reviewer's **Review queue** are both `GET /questions/submissions`, scoped by role (own vs. everyone's); pass `status=` (comma-separated) for the per-status tabs, and use `GET /questions/counts` for the badges. A card is NEW when `isLive` is false and EDIT when `hasDraft` is true.
+- Approve, request-changes and reject are allowed only from `PENDING_REVIEW` (otherwise 409) and are written to `QuestionHistory`.
 
 ## 2. Functional requirements
 
@@ -201,12 +213,17 @@ Base path `/api/v1`. JSON in/out. Auth via `Authorization: Bearer <JWT>`.
 | GET | `/clients` | any | Clients the caller is permitted for |
 | POST | `/clients/:id/permissions` | reviewer | Grant a user access to a client |
 | DELETE | `/clients/:id/permissions/:userId` | reviewer | Revoke |
-| GET | `/questions` | any | Filter + keyword search (see below) |
+| GET | `/questions` | any | Live (approved) questions: filter + keyword search (see below) |
+| GET | `/questions/submissions` | any | Questions in review: own for authors, everyone's for reviewers; `status`, `sort` |
 | GET | `/questions/:id` | any | One question (404 if not visible) |
 | POST | `/questions` | `question:create` | Create (runs duplicate check) |
-| PATCH | `/questions/:id` | `edit_own` / `edit_any` | Edit |
+| PATCH | `/questions/:id` | `question:edit_own` (own questions) | Edit; an approved question goes back to review as a draft |
+| POST | `/questions/:id/approve` | `question:review` | Approve (applies a pending draft) |
+| POST | `/questions/:id/request-changes` | `question:review` | Body `{ note }` (required, max 1000); sends it back to the author |
+| POST | `/questions/:id/reject` | `question:review` | Body `{ note? }` (optional reason, max 1000) |
+| GET | `/questions/counts` | `question:read` | Per-status counts for tab badges: the whole queue for reviewers, own questions for everyone else |
 | POST | `/questions/check-duplicate` | `question:create` | Dry-run duplicate check |
-| GET | `/questions/:id/history` | any (visible) | Change history |
+| GET | `/questions/:id/history` | author or reviewer | Review timeline, newest first (submitted, edit submitted, approved, changes requested, rejected, with notes) |
 
 ### `GET /questions`
 
@@ -280,7 +297,8 @@ Integration tests run against a real Postgres (not mocks):
 
 1. **No-leak search (most important):** user without permission for Client A searches a keyword that matches *only* Client A's questions → response status, body, and shape are identical to searching a keyword that matches nothing. Repeat with filters and pagination. Also assert a permitted user *does* see the match.
 2. **Restricted get-by-id / edit-by-id** by a non-permitted user → 404, same as a random UUID.
-3. **Edit permissions:** user edits own → 200; user edits another's by ID → 403; reviewer edits any → 200; no token → 401.
+3. **Edit permissions:** user edits own → 200; user edits another's by ID → 403; reviewer edits → 403; no token → 401.
+3b. **Review flow:** new question is hidden from other users until approved; an edit of an approved question leaves the live text unchanged until re-approved; request-changes requires a note and reject takes an optional one; reviewing a question that is not pending → 409.
 4. **Validation:** empty text, nonexistent tag category, tag in wrong category, malformed body → 400 before any service logic runs.
 5. **Combined filter:** AND across categories / OR within, plus keyword.
 6. **Duplicate detection:** near-duplicate → 409; `confirmDistinct` path → 201 + audit entry; duplicate of a *restricted* question is not reported to a non-permitted user.

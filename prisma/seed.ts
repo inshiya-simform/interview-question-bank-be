@@ -18,7 +18,7 @@ const taxonomy: Record<string, { name: string; tags: string[] }> = {
 
 // role -> permission codes. Changing access is a data change: edit this map (or the rows).
 const rolePermissions: Record<string, string[]> = {
-  REVIEWER: ['question:read', 'question:edit_any'],
+  REVIEWER: ['question:read', 'question:review'],
   USER: ['question:read', 'question:create', 'question:edit_own'],
   SUPER_ADMIN: ['user:read', 'user:create_staff', 'client:read_all', 'client:create', 'client:assign'],
 };
@@ -98,10 +98,29 @@ async function main() {
       { text: 'Write a query to find duplicate emails in a users table.', notes: 'GROUP BY email HAVING COUNT(*) > 1.', client: null, tags: ['technology:postgres', 'seniority:junior', 'question-type:coding'] },
       { text: 'Describe how you would migrate the Acme billing monolith to services.', notes: 'Confidential Acme context: strangler pattern around the invoicing module.', client: acme!.id, tags: ['technology:node', 'seniority:senior', 'question-type:system-design'] },
       { text: 'Globex asks candidates to design a multi-tenant reporting pipeline.', notes: 'Confidential Globex context: partition by tenant id.', client: globex!.id, tags: ['technology:postgres', 'seniority:senior', 'question-type:system-design'] },
+      { text: 'What is the difference between a process and a thread?', notes: 'Memory isolation vs shared address space; cost of context switching.', client: null, tags: ['technology:node', 'seniority:junior', 'question-type:conceptual'] },
+      { text: 'Tell me about a time you disagreed with a teammate.', notes: '', client: null, tags: ['seniority:mid', 'question-type:behavioural'] },
     ];
-    for (const s of samples) {
+    // The first five are live; the last two sit in the review queue, one waiting and one sent back.
+    const reviewer = byEmail['reviewer@example.com']!;
+    const reviewStates = [
+      { status: 'APPROVED', published: true },
+      { status: 'APPROVED', published: true },
+      { status: 'APPROVED', published: true },
+      { status: 'APPROVED', published: true },
+      { status: 'APPROVED', published: true },
+      { status: 'PENDING_REVIEW', published: false },
+      { status: 'CHANGES_REQUESTED', published: false, note: 'Add what a strong answer covers, not just the topic.' },
+    ] as const;
+    for (const [i, s] of samples.entries()) {
+      const state = reviewStates[i]!;
+      const note = 'note' in state ? state.note : null;
       await prisma.question.create({
         data: {
+          status: state.status,
+          publishedAt: state.published ? new Date() : null,
+          ...(state.status !== 'PENDING_REVIEW' && { reviewedById: reviewer.id, reviewedAt: new Date() }),
+          reviewNote: note,
           text: s.text,
           normalizedText: normalizeText(s.text),
           answerNotes: s.notes,

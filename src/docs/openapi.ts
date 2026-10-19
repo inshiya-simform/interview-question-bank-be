@@ -362,9 +362,9 @@ export const openApiSpec = {
     '/questions': {
       get: {
         tags: ['Questions'],
-        summary: 'List questions the current user may see (requires question:read)',
+        summary: 'List live (approved) questions (requires question:read)',
         description:
-          'USER: questions with no client or a client they hold a grant on, plus their own questions. REVIEWER: all questions.',
+          'The question bank: approved questions only, for every role. Questions with no client or a client the user holds a grant on; reviewers see every client. A user\'s own unapproved questions are not listed here: see GET /questions/submissions.',
         security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
@@ -399,6 +399,7 @@ export const openApiSpec = {
       post: {
         tags: ['Questions'],
         summary: 'Create a question (requires question:create)',
+        description: 'The question starts as PENDING_REVIEW and is visible only to its author and reviewers until a reviewer approves it.',
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -420,6 +421,77 @@ export const openApiSpec = {
               'DUPLICATE_SUSPECTED: the text is similar to existing visible questions. Resubmit with confirmDistinct: true and a distinctReason to store it anyway. Body: error.details.matches.',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
+        },
+      },
+    },
+    '/questions/submissions': {
+      get: {
+        tags: ['Questions'],
+        summary: 'List questions in review (requires question:read)',
+        description:
+          'Authors: their own questions (the My submissions tab). Reviewers: every author\'s (the review queue). Default statuses are PENDING_REVIEW, CHANGES_REQUESTED and REJECTED; an approved question with an edit waiting for review is PENDING_REVIEW and appears here as well as in the live list. Default order: reviewers oldest submitted first, authors newest first.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+          { name: 'status', in: 'query', schema: { type: 'string', example: 'PENDING_REVIEW,REJECTED' }, description: 'Comma-separated statuses (PENDING_REVIEW, APPROVED, CHANGES_REQUESTED, REJECTED)' },
+          { name: 'sort', in: 'query', schema: { type: 'string', enum: ['submitted_asc', 'submitted_desc'] } },
+        ],
+        responses: {
+          '200': {
+            description: 'Submissions with review state (status, reviewNote, reviewedBy, author, isLive, hasDraft, submittedAt). For an edit of an approved question, `text` and the other fields are the live version and `draft` holds the submitted edit.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    questions: { type: 'array', items: { $ref: '#/components/schemas/Question' } },
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    total: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+        },
+      },
+    },
+    '/questions/counts': {
+      get: {
+        tags: ['Questions'],
+        summary: 'Per-status question counts for the tab badges (requires question:read)',
+        description:
+          'Badges for the submissions tabs. Reviewers get counts for the whole queue (matches GET /questions/submissions); everyone else gets counts of their own questions.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Counts, zero-filled for every status',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    counts: {
+                      type: 'object',
+                      properties: {
+                        PENDING_REVIEW: { type: 'integer' },
+                        APPROVED: { type: 'integer' },
+                        CHANGES_REQUESTED: { type: 'integer' },
+                        REJECTED: { type: 'integer' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
         },
       },
     },
@@ -495,9 +567,9 @@ export const openApiSpec = {
       },
       patch: {
         tags: ['Questions'],
-        summary: 'Edit a question (requires question:edit_own or question:edit_any)',
+        summary: 'Edit your own question (requires question:edit_own)',
         description:
-          'USER: only their own questions. REVIEWER: any question. Omitted fields are unchanged; `tags`, when sent, replaces the full tag set. Changes are recorded in question history.',
+          'Omitted fields are unchanged; `tags`, when sent, replaces the full tag set. A question that was never approved is edited in place; an approved question keeps its live version and the edit is stored as a draft. Either way the status returns to PENDING_REVIEW. A REJECTED question cannot be edited (409). Changes are recorded in question history.',
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         requestBody: {
@@ -515,6 +587,99 @@ export const openApiSpec = {
           '401': { $ref: '#/components/responses/Unauthorized' },
           '403': { $ref: '#/components/responses/Forbidden' },
           '404': { $ref: '#/components/responses/NotFound' },
+          '409': { description: 'The question was rejected and can no longer be edited', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/questions/{id}/history': {
+      get: {
+        tags: ['Questions'],
+        summary: 'Review timeline of a question, newest first (author and reviewers only)',
+        description:
+          'Actions: CREATED (submitted), UPDATED (edit submitted), APPROVED, CHANGES_REQUESTED, REJECTED. `note` is present on change requests and rejections that have one.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': {
+            description: 'History entries',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    history: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string', format: 'uuid' },
+                          action: { type: 'string', enum: ['CREATED', 'UPDATED', 'APPROVED', 'CHANGES_REQUESTED', 'REJECTED'] },
+                          actor: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } },
+                          createdAt: { type: 'string', format: 'date-time' },
+                          note: { type: 'string' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { description: 'Caller is neither the author nor a reviewer', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
+    '/questions/{id}/approve': {
+      post: {
+        tags: ['Questions'],
+        summary: 'Approve a question pending review (requires question:review)',
+        description: 'Makes a new question live, or applies a pending draft to an approved one. Any reviewer may approve.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': { description: 'Approved question', content: { 'application/json': { schema: { $ref: '#/components/schemas/Question' } } } },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+          '409': { description: 'Question is not pending review', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/questions/{id}/request-changes': {
+      post: {
+        tags: ['Questions'],
+        summary: 'Ask the author for changes (requires question:review)',
+        description: 'Sets status CHANGES_REQUESTED with the note. When the author edits, the question returns to PENDING_REVIEW.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/ReviewNoteRequest' } } } },
+        responses: {
+          '200': { description: 'Question with status CHANGES_REQUESTED', content: { 'application/json': { schema: { $ref: '#/components/schemas/Question' } } } },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+          '409': { description: 'Question is not pending review', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/questions/{id}/reject': {
+      post: {
+        tags: ['Questions'],
+        summary: 'Reject a question pending review (requires question:review)',
+        description: 'The note is optional. A never-approved question becomes REJECTED (final). For an approved question with a pending edit, the draft is discarded, the live version stays and the status returns to APPROVED.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: false, content: { 'application/json': { schema: { $ref: '#/components/schemas/RejectRequest' } } } },
+        responses: {
+          '200': { description: 'Question after rejection', content: { 'application/json': { schema: { $ref: '#/components/schemas/Question' } } } },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+          '409': { description: 'Question is not pending review', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },
@@ -662,9 +827,55 @@ export const openApiSpec = {
             additionalProperties: { type: 'array', items: { type: 'string' } },
           },
           authorId: { type: 'string', format: 'uuid' },
+          status: {
+            type: 'string',
+            enum: ['PENDING_REVIEW', 'APPROVED', 'CHANGES_REQUESTED', 'REJECTED'],
+            description: 'Everyone except the author and reviewers always sees APPROVED.',
+          },
+          reviewNote: { type: 'string', nullable: true, description: 'Author and reviewers only: latest change-request or rejection reason' },
+          reviewedBy: {
+            type: 'object',
+            nullable: true,
+            description: 'Author and reviewers only',
+            properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } },
+          },
+          reviewedAt: { type: 'string', format: 'date-time', nullable: true, description: 'Author and reviewers only' },
+          author: {
+            type: 'object',
+            description: 'Author and reviewers only',
+            properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } },
+          },
+          isLive: { type: 'boolean', description: 'Author and reviewers only: has been approved before. With hasDraft this is an edit of a live question (EDIT); without it, a new submission (NEW).' },
+          submittedAt: { type: 'string', format: 'date-time', description: 'Author and reviewers only: when it was created or last (re)submitted for review' },
+          hasDraft: { type: 'boolean', description: 'Author and reviewers only: an edit is waiting for review' },
+          draft: {
+            type: 'object',
+            description: 'Single-question and submissions views, author and reviewers only: the pending edit of an approved question',
+            properties: {
+              text: { type: 'string' },
+              answerNotes: { type: 'string' },
+              client: {
+                type: 'object',
+                nullable: true,
+                properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } },
+              },
+              tags: { type: 'object', additionalProperties: { type: 'array', items: { type: 'string' } } },
+            },
+          },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
+      },
+      ReviewNoteRequest: {
+        type: 'object',
+        required: ['note'],
+        additionalProperties: false,
+        properties: { note: { type: 'string', minLength: 1, maxLength: 1000 } },
+      },
+      RejectRequest: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { note: { type: 'string', maxLength: 1000, description: 'Optional reason shown to the author' } },
       },
       CreateStaffRequest: {
         type: 'object',

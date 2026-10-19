@@ -1,6 +1,6 @@
 import { env } from '../config/env.js';
 import { prisma } from '../db/prisma.js';
-import type { Prisma } from '../generated/prisma/client.js';
+import type { Prisma, QuestionStatus } from '../generated/prisma/client.js';
 import type { AuthUser } from '../types/express.js';
 import { AppError } from '../utils/AppError.js';
 import { normalizeText } from '../utils/normalize.js';
@@ -8,6 +8,9 @@ import type {
   CheckDuplicateInput,
   CreateQuestionInput,
   ListQuestionsQuery,
+  ListSubmissionsQuery,
+  RejectInput,
+  RequestChangesInput,
   UpdateQuestionInput,
 } from '../validators/question.validators.js';
 
@@ -119,7 +122,7 @@ export async function createQuestion(user: AuthUser, input: CreateQuestionInput)
         authorId: user.id,
         tags: { create: found.map((t) => ({ tagId: t.id, categoryId: t.categoryId })) },
       },
-      include: { client: true },
+      include: questionInclude,
     });
 
     await tx.questionHistory.create({
@@ -140,39 +143,38 @@ export async function createQuestion(user: AuthUser, input: CreateQuestionInput)
     return created;
   });
 
-  const tags: Record<string, string[]> = {};
-  for (const t of found) (tags[t.category.slug] ??= []).push(t.slug);
-
-  return {
-    id: question.id,
-    text: question.text,
-    answerNotes: question.answerNotes,
-    client: question.client ? { id: question.client.id, name: question.client.name } : null,
-    tags,
-    authorId: question.authorId,
-    createdAt: question.createdAt,
-    updatedAt: question.updatedAt,
-  };
+  return toDetailDto(user, question);
 }
 
-// Reviewers (edit_any) see everything. Everyone else sees unrestricted questions
-// plus those of clients they hold a grant on; users with edit_own also see their own.
+// Who may open a single question (and edit or review it). Reviewers see everything, in any status.
+// Everyone else sees a question only once it has been approved (publishedAt), and then only if it
+// is unrestricted or belongs to a client they hold a grant on. Authors always see their own
+// questions, whatever their status.
 function visibilityFilter(user: AuthUser): Prisma.QuestionWhereInput {
-  if (user.permissions.includes('question:edit_any')) return {};
+  if (user.permissions.includes('question:review')) return {};
 
   const visible: Prisma.QuestionWhereInput[] = [
-    { clientId: null },
-    { clientId: { in: user.clientIds } },
+    { publishedAt: { not: null }, OR: [{ clientId: null }, { clientId: { in: user.clientIds } }] },
   ];
   if (user.permissions.includes('question:edit_own')) visible.push({ authorId: user.id });
   return { OR: visible };
+}
+
+// The live bank: approved questions only, for every role. Restricted-client questions still
+// need a grant; reviewers see every client's. A user's own pending work is in listSubmissions.
+function liveFilter(user: AuthUser): Prisma.QuestionWhereInput {
+  if (user.permissions.includes('question:review')) return { publishedAt: { not: null } };
+  return {
+    publishedAt: { not: null },
+    OR: [{ clientId: null }, { clientId: { in: user.clientIds } }],
+  };
 }
 
 export async function listQuestions(
   user: AuthUser,
   { page, limit, clientId, tags, categories, search }: ListQuestionsQuery,
 ) {
-  const filters: Prisma.QuestionWhereInput[] = [visibilityFilter(user)];
+  const filters: Prisma.QuestionWhereInput[] = [liveFilter(user)];
 
   // Filters narrow the visible set; they can never widen it.
   if (clientId) filters.push({ clientId });
@@ -192,145 +194,381 @@ export async function listQuestions(
     prisma.question.count({ where }),
     prisma.question.findMany({
       where,
-      include: {
-        client: { select: { id: true, name: true } },
-        tags: { include: { tag: { include: { category: true } } } },
-      },
+      include: questionInclude,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
       skip: (page - 1) * limit,
       take: limit,
     }),
   ]);
 
-  const questions = rows.map((q) => {
-    const tags: Record<string, string[]> = {};
-    for (const { tag } of q.tags) (tags[tag.category.slug] ??= []).push(tag.slug);
-    return {
-      id: q.id,
-      text: q.text,
-      answerNotes: q.answerNotes,
-      client: q.client,
-      tags,
-      authorId: q.authorId,
-      createdAt: q.createdAt,
-      updatedAt: q.updatedAt,
-    };
+  return { questions: rows.map((q) => toQuestionDto(user, q)), page, limit, total };
+}
+
+const NOT_LIVE: QuestionStatus[] = ['PENDING_REVIEW', 'CHANGES_REQUESTED', 'REJECTED'];
+
+// Review work: reviewers see every author's submissions (their queue), everyone else only their own.
+// An approved question with an edit waiting for review is PENDING_REVIEW, so it shows up here too.
+export async function listSubmissions(user: AuthUser, { page, limit, status, sort }: ListSubmissionsQuery) {
+  const isReviewer = user.permissions.includes('question:review');
+  const where: Prisma.QuestionWhereInput = {
+    ...(isReviewer ? {} : { authorId: user.id }),
+    status: { in: status ?? NOT_LIVE },
+  };
+  const direction = (sort ?? (isReviewer ? 'submitted_asc' : 'submitted_desc')) === 'submitted_asc' ? 'asc' : 'desc';
+
+  const [total, rows] = await prisma.$transaction([
+    prisma.question.count({ where }),
+    prisma.question.findMany({
+      where,
+      include: questionInclude,
+      orderBy: [{ submittedAt: direction }, { id: 'asc' }],
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+  ]);
+
+  // Cards for an edit show the submitted text (draft), not the live version it will replace.
+  return { questions: await withDrafts(user, rows), page, limit, total };
+}
+
+// Per-status totals for the tab badges: reviewers count the whole queue, everyone else their own
+// submissions (other people's real statuses are not theirs to see).
+export async function countQuestions(user: AuthUser) {
+  const isReviewer = user.permissions.includes('question:review');
+
+  const rows = await prisma.question.groupBy({
+    by: ['status'],
+    where: { AND: [visibilityFilter(user), ...(isReviewer ? [] : [{ authorId: user.id }])] },
+    _count: { _all: true },
   });
 
-  return { questions, page, limit, total };
+  const counts: Record<QuestionStatus, number> = {
+    PENDING_REVIEW: 0,
+    APPROVED: 0,
+    CHANGES_REQUESTED: 0,
+    REJECTED: 0,
+  };
+  for (const r of rows) counts[r.status] = r._count._all;
+  return { counts };
+}
+
+// Review timeline for the author and reviewers. Newest first.
+export async function getQuestionHistory(user: AuthUser, id: string) {
+  const q = await prisma.question.findFirst({
+    where: { AND: [{ id }, visibilityFilter(user)] },
+    select: { authorId: true },
+  });
+  if (!q) throw new AppError(404, 'NOT_FOUND', 'Question not found');
+  if (!canSeeReview(user, q)) throw new AppError(403, 'FORBIDDEN', 'Only the author and reviewers can see history');
+
+  const rows = await prisma.questionHistory.findMany({
+    where: { questionId: id },
+    include: { actor: { select: { id: true, name: true } } },
+    orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+  });
+
+  const history = rows.map((h) => {
+    const note = (h.changes as { note?: string | null } | null)?.note;
+    return {
+      id: h.id,
+      action: h.action,
+      actor: h.actor,
+      createdAt: h.createdAt,
+      ...(note && { note }),
+    };
+  });
+  return { history };
 }
 
 export async function updateQuestion(user: AuthUser, id: string, input: UpdateQuestionInput) {
-  const canEditAny = user.permissions.includes('question:edit_any');
   const canEditOwn = user.permissions.includes('question:edit_own');
 
   // Invisible questions look the same as nonexistent ones.
   const existing = await prisma.question.findFirst({
     where: { AND: [{ id }, visibilityFilter(user)] },
-    include: { tags: true },
+    include: { tags: true, draft: true },
   });
   if (!existing) throw new AppError(404, 'NOT_FOUND', 'Question not found');
 
-  if (!canEditAny && !(canEditOwn && existing.authorId === user.id)) {
+  // Only authors edit; reviewers act through the review endpoints.
+  if (!(canEditOwn && existing.authorId === user.id)) {
     throw new AppError(403, 'FORBIDDEN', 'You can only edit your own questions');
   }
+  if (existing.status === 'REJECTED') {
+    throw new AppError(409, 'CONFLICT', 'A rejected question can no longer be edited');
+  }
 
-  const clientChanged = input.clientId !== undefined && (input.clientId ?? null) !== existing.clientId;
-  if (clientChanged && input.clientId) {
-    // Reviewers may assign any client; others only clients they hold a grant on.
-    const allowed = canEditAny
-      ? (await prisma.client.count({ where: { id: input.clientId } })) > 0
-      : user.clientIds.includes(input.clientId);
-    if (!allowed) throw new AppError(404, 'NOT_FOUND', 'Client not found');
+  // Edits are diffed against the pending draft when there is one, else the live content.
+  const base: DraftPayload =
+    (existing.draft?.payload as DraftPayload | undefined) ?? {
+      text: existing.text,
+      answerNotes: existing.answerNotes,
+      clientId: existing.clientId,
+      tags: existing.tags.map((t) => ({ tagId: t.tagId, categoryId: t.categoryId })),
+    };
+
+  const clientChanged = input.clientId !== undefined && (input.clientId ?? null) !== base.clientId;
+  if (clientChanged && input.clientId && !user.clientIds.includes(input.clientId)) {
+    // Same response as a nonexistent client, so it doesn't reveal which clients exist.
+    throw new AppError(404, 'NOT_FOUND', 'Client not found');
   }
 
   const found = input.tags ? await resolveTags(input.tags) : null;
 
-  const data: Prisma.QuestionUpdateInput = {};
+  const next: DraftPayload = { ...base };
   const changes: Record<string, unknown> = {};
-  if (input.text !== undefined && input.text !== existing.text) {
-    data.text = input.text;
-    data.normalizedText = normalizeText(input.text);
-    changes.text = { from: existing.text, to: input.text };
+  if (input.text !== undefined && input.text !== base.text) {
+    next.text = input.text;
+    changes.text = { from: base.text, to: input.text };
   }
-  if (input.answerNotes !== undefined && input.answerNotes !== existing.answerNotes) {
-    data.answerNotes = input.answerNotes;
-    changes.answerNotes = { from: existing.answerNotes, to: input.answerNotes };
+  if (input.answerNotes !== undefined && input.answerNotes !== base.answerNotes) {
+    next.answerNotes = input.answerNotes;
+    changes.answerNotes = { from: base.answerNotes, to: input.answerNotes };
   }
   if (clientChanged) {
-    const clientId = input.clientId ?? null;
-    data.client = clientId ? { connect: { id: clientId } } : { disconnect: true };
-    changes.clientId = { from: existing.clientId, to: clientId };
+    next.clientId = input.clientId ?? null;
+    changes.clientId = { from: base.clientId, to: next.clientId };
   }
-
-  let tagsChanged = false;
   if (found) {
-    const before = existing.tags.map((t) => t.tagId).sort((a, b) => a - b);
+    const before = base.tags.map((t) => t.tagId).sort((a, b) => a - b);
     const after = found.map((t) => t.id).sort((a, b) => a - b);
-    tagsChanged = before.join() !== after.join();
-    if (tagsChanged) changes.tags = { from: before, to: after };
+    if (before.join() !== after.join()) {
+      next.tags = found.map((t) => ({ tagId: t.id, categoryId: t.categoryId }));
+      changes.tags = { from: before, to: after };
+    }
   }
 
   if (Object.keys(changes).length > 0) {
+    const published = existing.publishedAt !== null;
     await prisma.$transaction(async (tx) => {
-      if (tagsChanged && found) {
-        await tx.questionTag.deleteMany({ where: { questionId: id } });
-        await tx.questionTag.createMany({
-          data: found.map((t) => ({ questionId: id, tagId: t.id, categoryId: t.categoryId })),
+      if (published) {
+        // The live version stays as approved; the edit waits in a draft until a reviewer approves it.
+        await tx.questionDraft.upsert({
+          where: { questionId: id },
+          create: { questionId: id, payload: next as Prisma.InputJsonObject },
+          update: { payload: next as Prisma.InputJsonObject },
+        });
+        await tx.question.update({
+          where: { id },
+          data: { status: 'PENDING_REVIEW', reviewNote: null, submittedAt: new Date() },
+        });
+      } else {
+        // Never approved: nobody else has seen it, so edit in place and send it back to review.
+        await replaceContent(tx, id, next);
+        await tx.question.update({
+          where: { id },
+          data: { status: 'PENDING_REVIEW', reviewNote: null, submittedAt: new Date() },
         });
       }
-      // Always issued so updatedAt moves even when only tags changed.
-      await tx.question.update({ where: { id }, data });
       await tx.questionHistory.create({
-        data: { questionId: id, actorId: user.id, action: 'UPDATED', changes: changes as Prisma.InputJsonObject },
+        data: {
+          questionId: id,
+          actorId: user.id,
+          action: 'UPDATED',
+          changes: { ...changes, ...(published && { pendingReview: true }) } as Prisma.InputJsonObject,
+        },
       });
     });
   }
 
-  const q = await prisma.question.findUniqueOrThrow({
-    where: { id },
-    include: {
-      client: { select: { id: true, name: true } },
-      tags: { include: { tag: { include: { category: true } } } },
-    },
-  });
-  const tags: Record<string, string[]> = {};
-  for (const { tag } of q.tags) (tags[tag.category.slug] ??= []).push(tag.slug);
-
-  return {
-    id: q.id,
-    text: q.text,
-    answerNotes: q.answerNotes,
-    client: q.client,
-    tags,
-    authorId: q.authorId,
-    createdAt: q.createdAt,
-    updatedAt: q.updatedAt,
-  };
+  return getQuestion(user, id);
 }
 
 export async function getQuestion(user: AuthUser, id: string) {
   // Invisible questions look the same as nonexistent ones.
   const q = await prisma.question.findFirst({
     where: { AND: [{ id }, visibilityFilter(user)] },
-    include: {
-      client: { select: { id: true, name: true } },
-      tags: { include: { tag: { include: { category: true } } } },
-    },
+    include: questionInclude,
   });
   if (!q) throw new AppError(404, 'NOT_FOUND', 'Question not found');
 
-  const tags: Record<string, string[]> = {};
-  for (const { tag } of q.tags) (tags[tag.category.slug] ??= []).push(tag.slug);
+  return toDetailDto(user, q);
+}
 
+export const approveQuestion = (user: AuthUser, id: string) => review(user, id, { kind: 'approve' });
+export const requestChanges = (user: AuthUser, id: string, { note }: RequestChangesInput) =>
+  review(user, id, { kind: 'requestChanges', note });
+export const rejectQuestion = (user: AuthUser, id: string, { note }: RejectInput) =>
+  review(user, id, { kind: 'reject', note });
+
+type ReviewAction =
+  | { kind: 'approve' }
+  | { kind: 'requestChanges'; note: string }
+  | { kind: 'reject'; note: string | undefined };
+
+// Any reviewer may act, but only on a question that is waiting for review.
+async function review(user: AuthUser, id: string, action: ReviewAction) {
+  const existing = await prisma.question.findUnique({ where: { id }, include: { draft: true } });
+  if (!existing) throw new AppError(404, 'NOT_FOUND', 'Question not found');
+  if (existing.status !== 'PENDING_REVIEW') {
+    throw new AppError(409, 'CONFLICT', 'Only a question that is pending review can be reviewed');
+  }
+
+  const now = new Date();
+  const draft = existing.draft?.payload as DraftPayload | undefined;
+  const published = existing.publishedAt !== null;
+
+  let status: QuestionStatus;
+  let note: string | null = null;
+  let historyAction: 'APPROVED' | 'CHANGES_REQUESTED' | 'REJECTED';
+  let changes: Prisma.InputJsonObject;
+  switch (action.kind) {
+    case 'approve':
+      status = 'APPROVED';
+      historyAction = 'APPROVED';
+      changes = { appliedDraft: !!draft };
+      break;
+    case 'requestChanges':
+      status = 'CHANGES_REQUESTED';
+      note = action.note;
+      historyAction = 'CHANGES_REQUESTED';
+      changes = { note };
+      break;
+    case 'reject':
+      // A published question keeps its approved version; only the pending edit is turned down.
+      status = published ? 'APPROVED' : 'REJECTED';
+      note = action.note ?? null;
+      historyAction = 'REJECTED';
+      changes = { note, discardedDraft: !!draft, status };
+      break;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // Re-checks the status in the write itself, so two reviewers can't both act on one submission.
+    const claimed = await tx.question.updateMany({
+      where: { id, status: 'PENDING_REVIEW' },
+      data: {
+        status,
+        reviewNote: note,
+        reviewedById: user.id,
+        reviewedAt: now,
+        ...(action.kind === 'approve' && !published && { publishedAt: now }),
+      },
+    });
+    if (claimed.count === 0) {
+      throw new AppError(409, 'CONFLICT', 'Only a question that is pending review can be reviewed');
+    }
+
+    if (draft && action.kind === 'approve') await replaceContent(tx, id, draft);
+    // Approved: applied above. Rejected: turned down. Either way the draft is done.
+    if (draft && action.kind !== 'requestChanges') await tx.questionDraft.delete({ where: { questionId: id } });
+
+    await tx.questionHistory.create({
+      data: { questionId: id, actorId: user.id, action: historyAction, changes },
+    });
+  });
+
+  return getQuestion(user, id);
+}
+
+// Writes content onto the question row and replaces its tag set.
+async function replaceContent(tx: Prisma.TransactionClient, id: string, content: DraftPayload) {
+  await tx.questionTag.deleteMany({ where: { questionId: id } });
+  await tx.questionTag.createMany({
+    data: content.tags.map((t) => ({ questionId: id, tagId: t.tagId, categoryId: t.categoryId })),
+  });
+  // Always issued so updatedAt moves even when only tags changed.
+  await tx.question.update({
+    where: { id },
+    data: {
+      text: content.text,
+      normalizedText: normalizeText(content.text),
+      answerNotes: content.answerNotes,
+      clientId: content.clientId,
+    },
+  });
+}
+
+const questionInclude = {
+  client: { select: { id: true, name: true } },
+  tags: { include: { tag: { include: { category: true } } } },
+  reviewedBy: { select: { id: true, name: true } },
+  author: { select: { id: true, name: true } },
+  draft: true,
+} satisfies Prisma.QuestionInclude;
+
+type QuestionRow = Prisma.QuestionGetPayload<{ include: typeof questionInclude }>;
+
+// Shape of QuestionDraft.payload.
+type DraftPayload = {
+  text: string;
+  answerNotes: string;
+  clientId: string | null;
+  tags: { tagId: number; categoryId: number }[];
+};
+
+function groupTags(tags: { slug: string; category: { slug: string } }[]) {
+  const grouped: Record<string, string[]> = {};
+  for (const t of tags) (grouped[t.category.slug] ??= []).push(t.slug);
+  return grouped;
+}
+
+// Review state is for the author and reviewers only; everyone else just sees approved content.
+function canSeeReview(user: AuthUser, q: { authorId: string }) {
+  return q.authorId === user.id || user.permissions.includes('question:review');
+}
+
+function toQuestionDto(user: AuthUser, q: QuestionRow) {
+  const seesReview = canSeeReview(user, q);
   return {
     id: q.id,
     text: q.text,
     answerNotes: q.answerNotes,
     client: q.client,
-    tags,
+    tags: groupTags(q.tags.map((t) => t.tag)),
     authorId: q.authorId,
+    // A live question under re-review is still approved as far as everyone else is concerned.
+    status: seesReview ? q.status : 'APPROVED',
     createdAt: q.createdAt,
     updatedAt: q.updatedAt,
+    ...(seesReview && {
+      author: q.author,
+      isLive: q.publishedAt !== null, // false: never approved. true with hasDraft: the live version is unchanged
+      submittedAt: q.submittedAt,
+      reviewNote: q.reviewNote,
+      reviewedBy: q.reviewedBy,
+      reviewedAt: q.reviewedAt,
+      hasDraft: q.draft !== null,
+    }),
   };
+}
+
+// Adds each pending edit, resolved to the same shape as the live content. Author and reviewers only.
+// Tags and clients for all rows are loaded in one query each, so a page costs two extra queries.
+async function withDrafts(user: AuthUser, rows: QuestionRow[]) {
+  const drafts = rows.map((q) => (q.draft && canSeeReview(user, q) ? (q.draft.payload as DraftPayload) : null));
+  const tagIds = [...new Set(drafts.flatMap((d) => d?.tags.map((t) => t.tagId) ?? []))];
+  const clientIds = [...new Set(drafts.flatMap((d) => (d?.clientId ? [d.clientId] : [])))];
+
+  const [tags, clients] = await Promise.all([
+    tagIds.length > 0
+      ? prisma.tag.findMany({ where: { id: { in: tagIds } }, include: { category: true } })
+      : [],
+    clientIds.length > 0
+      ? prisma.client.findMany({ where: { id: { in: clientIds } }, select: { id: true, name: true } })
+      : [],
+  ]);
+  const tagById = new Map(tags.map((t) => [t.id, t]));
+  const clientById = new Map(clients.map((c) => [c.id, c]));
+
+  return rows.map((q, i) => {
+    const dto = toQuestionDto(user, q);
+    const d = drafts[i];
+    if (!d) return dto;
+    return {
+      ...dto,
+      draft: {
+        text: d.text,
+        answerNotes: d.answerNotes,
+        client: d.clientId ? (clientById.get(d.clientId) ?? null) : null,
+        tags: groupTags(d.tags.flatMap((t) => tagById.get(t.tagId) ?? [])),
+      },
+    };
+  });
+}
+
+// Single-question view.
+async function toDetailDto(user: AuthUser, q: QuestionRow) {
+  const [dto] = await withDrafts(user, [q]);
+  return dto!;
 }

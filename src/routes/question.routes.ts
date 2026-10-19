@@ -1,24 +1,49 @@
 import { Router } from 'express';
-import { checkDuplicate, createQuestion, getQuestion, listQuestions, updateQuestion } from '../controllers/question.controller.js';
+import {
+  approveQuestion,
+  checkDuplicate,
+  countQuestions,
+  createQuestion,
+  getQuestion,
+  getQuestionHistory,
+  listQuestions,
+  listSubmissions,
+  rejectQuestion,
+  requestChanges,
+  updateQuestion,
+} from '../controllers/question.controller.js';
 import { authenticate } from '../middlewares/authenticate.js';
-import { requireAnyPermission, requirePermission } from '../middlewares/requirePermission.js';
+import { requirePermission } from '../middlewares/requirePermission.js';
 import { validate } from '../middlewares/validate.js';
-import { checkDuplicateSchema, createQuestionSchema, updateQuestionSchema } from '../validators/question.validators.js';
+import {
+  checkDuplicateSchema,
+  createQuestionSchema,
+  rejectSchema,
+  requestChangesSchema,
+  updateQuestionSchema,
+} from '../validators/question.validators.js';
 
 const router = Router();
 
 router.use(authenticate);
 
 router.get('/', requirePermission('question:read'), listQuestions);
+router.get('/submissions', requirePermission('question:read'), listSubmissions);
+router.get('/counts', requirePermission('question:read'), countQuestions);
 router.get('/:id', requirePermission('question:read'), getQuestion);
+router.get('/:id/history', requirePermission('question:read'), getQuestionHistory);
 router.post('/', requirePermission('question:create'), validate(createQuestionSchema), createQuestion);
 router.post('/check-duplicate', requirePermission('question:create'), validate(checkDuplicateSchema), checkDuplicate);
 router.patch(
   '/:id',
   // Ownership is enforced in the service: edit_own only covers the caller's own questions.
-  requireAnyPermission('question:edit_own', 'question:edit_any'),
+  requirePermission('question:edit_own'),
   validate(updateQuestionSchema),
   updateQuestion,
 );
+
+router.post('/:id/approve', requirePermission('question:review'), approveQuestion);
+router.post('/:id/request-changes', requirePermission('question:review'), validate(requestChangesSchema), requestChanges);
+router.post('/:id/reject', requirePermission('question:review'), validate(rejectSchema), rejectQuestion);
 
 export default router;
