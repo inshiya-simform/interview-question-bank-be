@@ -18,9 +18,8 @@ const taxonomy: Record<string, { name: string; tags: string[] }> = {
 
 // role -> permission codes. Changing access is a data change: edit this map (or the rows).
 const rolePermissions: Record<string, string[]> = {
-  AUTHOR: ['question:read', 'question:create', 'question:edit_own'],
   REVIEWER: ['question:read', 'question:edit_any'],
-  USER: ['question:read'],
+  USER: ['question:read', 'question:create', 'question:edit_own'],
   SUPER_ADMIN: ['user:read', 'user:create_staff', 'client:read_all', 'client:create', 'client:assign'],
 };
 
@@ -50,8 +49,6 @@ async function main() {
   const users = await Promise.all(
     (
       [
-        ['author@example.com', 'Alice Author', 'AUTHOR'],
-        ['author2@example.com', 'Aaron Author', 'AUTHOR'],
         ['reviewer@example.com', 'Riya Reviewer', 'REVIEWER'],
         ['admin@example.com', 'Sam Super', 'SUPER_ADMIN'],
         ['user@example.com', 'Uma User', 'USER'],
@@ -73,7 +70,7 @@ async function main() {
     ),
   );
 
-  // Only acme-user is granted Acme. Reviewer/authors deliberately have no grants
+  // Only acme-user is granted Acme. Reviewer deliberately have no grants
   // (roles are independent of client permission).
   await prisma.clientPermission.upsert({
     where: { userId_clientId: { userId: byEmail['acme-user@example.com']!.id, clientId: acme!.id } },
@@ -109,7 +106,7 @@ async function main() {
           normalizedText: normalizeText(s.text),
           answerNotes: s.notes,
           clientId: s.client,
-          authorId: byEmail['author@example.com']!.id,
+          authorId: byEmail['user@example.com']!.id,
           tags: {
             create: s.tags.map((key) => {
               const t = tagIds.get(key)!;
@@ -117,7 +114,7 @@ async function main() {
             }),
           },
           history: {
-            create: { actorId: byEmail['author@example.com']!.id, action: 'CREATED', changes: { text: s.text } },
+            create: { actorId: byEmail['user@example.com']!.id, action: 'CREATED', changes: { text: s.text } },
           },
         },
       });

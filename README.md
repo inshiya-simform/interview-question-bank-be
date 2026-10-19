@@ -1,6 +1,6 @@
 # Interview Question Bank — Backend
 
-Shared, searchable bank of interview/screening questions. Anyone can browse questions they're permitted to see; authors add and edit their own; reviewers edit anything; questions tied to a client are visible only to users granted access to that client.
+Shared, searchable bank of interview/screening questions. Anyone can browse questions they're permitted to see; users add and edit their own; reviewers edit anything; questions tied to a client are visible only to users granted access to that client.
 
 **Stack:** Node.js · Express 5 · TypeScript · Prisma · PostgreSQL · Docker Compose
 
@@ -14,9 +14,8 @@ Roles and permissions are rows, not code. A role is a named set of permission co
 
 | Role | Permissions |
 |---|---|
-| `AUTHOR` | `question:read`, `question:create`, `question:edit_own` |
 | `REVIEWER` | `question:read`, `question:edit_any` (cannot add) |
-| `USER` | `question:read` |
+| `USER` | `question:read`, `question:create`, `question:edit_own` |
 
 Edit rule: `question:edit_any`, or `question:edit_own` and `question.authorId === user.id`. Routes are gated with `requirePermission('<code>')`.
 
@@ -30,7 +29,7 @@ A question is **visible** to user `U` iff `question.clientId IS NULL` OR a `Clie
 2. **Combined filter** — AND across categories, OR within a category (`technology ∈ {React, Node} AND seniority ∈ {Mid, Senior}`), executed in the database.
 3. **Keyword search** — across question text and answer notes, combinable with filters.
 4. **Client-restricted visibility** — enforced in the query. Applies to list, search, get-by-id, duplicate check, and any counts/facets.
-5. **Edit permissions** — enforced by the API (not UI). Author → own only; Reviewer → any; User → none.
+5. **Edit permissions** — enforced by the API (not UI). User → own only; Reviewer → any.
 6. **Duplicate detection** — checked on submit; near-duplicates are surfaced, not silently stored.
 7. **Change history** — every create/edit records who and when.
 8. **No anonymous access** — every route except `/health` and `/auth/*` requires an authenticated user.
@@ -240,7 +239,7 @@ Query params: `q` (keyword), `tags[<categorySlug>]=a,b` (e.g. `tags[technology]=
 
 **Rule:** normalise the text (lowercase, strip punctuation, collapse whitespace, drop leading "what is/how do you"-style stop phrases optionally), then compare against **visible** questions using `pg_trgm` `similarity()`. A match is `similarity >= 0.8` (tunable via `DUPLICATE_SIMILARITY_THRESHOLD`) — also an exact `normalizedText` match always counts. The query uses the trigram GIN index (`%` operator with `pg_trgm.similarity_threshold` set, then `similarity()` for ranking), top 5 returned.
 
-**False positive:** the author resubmits with `confirmDistinct: true` and a mandatory `distinctReason`. The question is stored and the override (matched IDs, reason, actor) is written to the audit log. Overriding is allowed for anyone with `question:create`; the reason is the accountability.
+**False positive:** the user resubmits with `confirmDistinct: true` and a mandatory `distinctReason`. The question is stored and the override (matched IDs, reason, actor) is written to the audit log. Overriding is allowed for anyone with `question:create`; the reason is the accountability.
 
 ## 7. Authorization & validation
 
@@ -281,7 +280,7 @@ Integration tests run against a real Postgres (not mocks):
 
 1. **No-leak search (most important):** user without permission for Client A searches a keyword that matches *only* Client A's questions → response status, body, and shape are identical to searching a keyword that matches nothing. Repeat with filters and pagination. Also assert a permitted user *does* see the match.
 2. **Restricted get-by-id / edit-by-id** by a non-permitted user → 404, same as a random UUID.
-3. **Edit permissions:** author edits own → 200; author edits another's by ID → 403; reviewer edits any → 200; user → 403; no token → 401.
+3. **Edit permissions:** user edits own → 200; user edits another's by ID → 403; reviewer edits any → 200; no token → 401.
 4. **Validation:** empty text, nonexistent tag category, tag in wrong category, malformed body → 400 before any service logic runs.
 5. **Combined filter:** AND across categories / OR within, plus keyword.
 6. **Duplicate detection:** near-duplicate → 409; `confirmDistinct` path → 201 + audit entry; duplicate of a *restricted* question is not reported to a non-permitted user.

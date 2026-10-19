@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const STAFF_ROLES = ['AUTHOR', 'REVIEWER'] as const;
+export const STAFF_ROLES = ['REVIEWER'] as const;
 
 export const createStaffSchema = z
   .object({
