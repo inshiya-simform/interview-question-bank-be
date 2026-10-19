@@ -4,11 +4,12 @@ import {
   clientIdParamSchema,
   clientUserParamSchema,
   listClientAccessQuerySchema,
+  listUsersQuerySchema,
 } from '../validators/admin.validators.js';
 
-export const listUsers: RequestHandler = async (_req, res, next) => {
+export const listUsers: RequestHandler = async (req, res, next) => {
   try {
-    res.json(await adminService.listUsers());
+    res.json(await adminService.listUsers(listUsersQuerySchema.parse(req.query)));
   } catch (err) {
     next(err);
   }

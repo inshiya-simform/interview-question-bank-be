@@ -11,6 +11,15 @@ export const createStaffSchema = z
   })
   .strict();
 
+export const listUsersQuerySchema = z
+  .object({
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    // matches user name or email
+    search: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict();
+
 export const listClientAccessQuerySchema = z
   .object({
     page: z.coerce.number().int().min(1).default(1),
@@ -31,5 +40,6 @@ export const clientUserParamSchema = z.object({ clientId: z.uuid(), userId: z.uu
 
 export type CreateStaffInput = z.infer<typeof createStaffSchema>;
 export type CreateClientInput = z.infer<typeof createClientSchema>;
+export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
 export type ListClientAccessQuery = z.infer<typeof listClientAccessQuerySchema>;
 export type GrantClientAccessInput = z.infer<typeof grantClientAccessSchema>;

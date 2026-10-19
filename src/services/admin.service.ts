@@ -7,6 +7,7 @@ import type {
   CreateStaffInput,
   GrantClientAccessInput,
   ListClientAccessQuery,
+  ListUsersQuery,
 } from '../validators/admin.validators.js';
 
 // Staff accounts start with this password; the super admin hands it over out of band.
@@ -32,9 +33,26 @@ const toUserDto = (u: UserRow) => ({
   clients: u.permissions.map((p) => p.client).sort((a, b) => a.name.localeCompare(b.name)),
 });
 
-export async function listUsers() {
-  const users = await prisma.user.findMany({ select: userSelect, orderBy: { createdAt: 'desc' } });
-  return { users: users.map(toUserDto) };
+export async function listUsers({ page, limit, search }: ListUsersQuery) {
+  const where: Prisma.UserWhereInput = search
+    ? {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+        ],
+      }
+    : {};
+  const [total, users] = await prisma.$transaction([
+    prisma.user.count({ where }),
+    prisma.user.findMany({
+      where,
+      select: userSelect,
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+  ]);
+  return { users: users.map(toUserDto), page, limit, total };
 }
 
 const clientAccessSelect = {
