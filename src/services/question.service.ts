@@ -156,7 +156,7 @@ export async function createQuestion(user: AuthUser, input: CreateQuestionInput)
 }
 
 // Reviewers (edit_any) see everything. Everyone else sees unrestricted questions
-// plus those of clients they hold a grant on; authors (edit_own) also see their own.
+// plus those of clients they hold a grant on; users with edit_own also see their own.
 function visibilityFilter(user: AuthUser): Prisma.QuestionWhereInput {
   if (user.permissions.includes('question:edit_any')) return {};
 
@@ -237,7 +237,7 @@ export async function updateQuestion(user: AuthUser, id: string, input: UpdateQu
 
   const clientChanged = input.clientId !== undefined && (input.clientId ?? null) !== existing.clientId;
   if (clientChanged && input.clientId) {
-    // Reviewers may assign any client; authors only clients they hold a grant on.
+    // Reviewers may assign any client; others only clients they hold a grant on.
     const allowed = canEditAny
       ? (await prisma.client.count({ where: { id: input.clientId } })) > 0
       : user.clientIds.includes(input.clientId);

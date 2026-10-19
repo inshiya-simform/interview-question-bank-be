@@ -17,7 +17,7 @@ enum HistoryAction {
 // it stays in ClientPermission and in the query's WHERE clause.
 model Role {
   id   Int    @id @default(autoincrement())
-  name String @unique // SUPER_ADMIN | AUTHOR | REVIEWER | USER
+  name String @unique // SUPER_ADMIN | REVIEWER | USER
 
   permissions RolePermission[]
   users       User[]

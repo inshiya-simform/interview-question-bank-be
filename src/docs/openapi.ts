@@ -173,7 +173,7 @@ export const openApiSpec = {
       },
       post: {
         tags: ['Admin'],
-        summary: 'Create an author or reviewer with the default password (SUPER_ADMIN)',
+        summary: 'Create a reviewer with the default password (SUPER_ADMIN)',
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -364,7 +364,7 @@ export const openApiSpec = {
         tags: ['Questions'],
         summary: 'List questions the current user may see (requires question:read)',
         description:
-          'USER: questions with no client or a client they hold a grant on. AUTHOR: the same plus their own questions. REVIEWER: all questions.',
+          'USER: questions with no client or a client they hold a grant on, plus their own questions. REVIEWER: all questions.',
         security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
@@ -497,7 +497,7 @@ export const openApiSpec = {
         tags: ['Questions'],
         summary: 'Edit a question (requires question:edit_own or question:edit_any)',
         description:
-          'AUTHOR: only their own questions. REVIEWER: any question. Omitted fields are unchanged; `tags`, when sent, replaces the full tag set. Changes are recorded in question history.',
+          'USER: only their own questions. REVIEWER: any question. Omitted fields are unchanged; `tags`, when sent, replaces the full tag set. Changes are recorded in question history.',
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
         requestBody: {
@@ -581,7 +581,7 @@ export const openApiSpec = {
           id: { type: 'string', format: 'uuid' },
           email: { type: 'string', format: 'email' },
           name: { type: 'string' },
-          role: { type: 'string', enum: ['AUTHOR', 'REVIEWER', 'USER'] },
+          role: { type: 'string', enum: ['REVIEWER', 'USER'] },
         },
       },
       AuthResult: {
@@ -638,7 +638,7 @@ export const openApiSpec = {
             type: 'string',
             format: 'uuid',
             nullable: true,
-            description: 'Authors need a grant on the client; reviewers may use any client. null makes it unrestricted',
+            description: 'Users need a grant on the client; reviewers may use any client. null makes it unrestricted',
           },
           tags: { $ref: '#/components/schemas/CreateQuestionRequest/properties/tags' },
         },
@@ -673,7 +673,7 @@ export const openApiSpec = {
         properties: {
           email: { type: 'string', format: 'email' },
           name: { type: 'string', minLength: 1, maxLength: 100, description: "Defaults to the email's local part" },
-          role: { type: 'string', enum: ['AUTHOR', 'REVIEWER'] },
+          role: { type: 'string', enum: ['REVIEWER'] },
         },
       },
       ClientAccess: {
@@ -701,7 +701,7 @@ export const openApiSpec = {
           id: { type: 'string', format: 'uuid' },
           email: { type: 'string', format: 'email' },
           name: { type: 'string' },
-          role: { type: 'string', example: 'AUTHOR' },
+          role: { type: 'string', example: 'USER' },
           createdAt: { type: 'string', format: 'date-time' },
           clients: {
             type: 'array',
