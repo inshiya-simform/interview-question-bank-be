@@ -151,22 +151,32 @@ export const openApiSpec = {
     '/admin/users': {
       get: {
         tags: ['Admin'],
-        summary: 'List all users with role and client grants (SUPER_ADMIN)',
+        summary: 'List users with role and client grants, paginated (SUPER_ADMIN)',
+        description: '`search` matches user name or email (case-insensitive).',
         security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+          { name: 'search', in: 'query', schema: { type: 'string' } },
+        ],
         responses: {
           '200': {
-            description: 'All users, newest first',
+            description: 'Users, newest first',
             content: {
               'application/json': {
                 schema: {
                   type: 'object',
                   properties: {
                     users: { type: 'array', items: { $ref: '#/components/schemas/AdminUser' } },
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    total: { type: 'integer' },
                   },
                 },
               },
             },
           },
+          '400': { $ref: '#/components/responses/ValidationError' },
           '401': { $ref: '#/components/responses/Unauthorized' },
           '403': { $ref: '#/components/responses/Forbidden' },
         },
