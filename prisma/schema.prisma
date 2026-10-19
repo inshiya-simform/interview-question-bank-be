@@ -10,6 +10,16 @@ datasource db {
 enum HistoryAction {
   CREATED
   UPDATED
+  APPROVED
+  CHANGES_REQUESTED
+  REJECTED
+}
+
+enum QuestionStatus {
+  PENDING_REVIEW
+  APPROVED
+  CHANGES_REQUESTED
+  REJECTED
 }
 
 // Roles and permissions are data, not code: adding a role or changing what a
@@ -25,7 +35,7 @@ model Role {
 
 model Permission {
   id   Int    @id @default(autoincrement())
-  code String @unique // question:read | question:create | question:edit_own | question:edit_any | user:read | user:create_staff | client:read_all | client:create | client:assign
+  code String @unique // question:read | question:create | question:edit_own | question:review | user:read | user:create_staff | client:read_all | client:create | client:assign
 
   roles RolePermission[]
 }
@@ -52,8 +62,9 @@ model User {
   role Role @relation(fields: [roleId], references: [id])
 
   questions   Question[]         @relation("QuestionAuthor")
-  permissions ClientPermission[]
-  history     QuestionHistory[]
+  permissions       ClientPermission[]
+  history           QuestionHistory[]
+  reviewedQuestions Question[]         @relation("QuestionReviewer")
 }
 
 model Client {
@@ -108,6 +119,16 @@ model Question {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
+  // Review cycle. text/answerNotes/clientId/tags always hold the live approved
+  // content once publishedAt is set; a pending edit of a published question
+  // lives in QuestionDraft instead.
+  status       QuestionStatus @default(PENDING_REVIEW)
+  publishedAt  DateTime? // first approval; NULL = never visible to anyone but author/reviewers
+  reviewedById String?
+  reviewedAt   DateTime?
+  reviewNote   String? // latest change-request / rejection reason (optional for rejections)
+  submittedAt  DateTime       @default(now()) // creation, and every author edit that (re)enters review
+
   // Generated column (see migration SQL); never written by the app.
   searchVector Unsupported("tsvector")?
 
@@ -116,10 +137,28 @@ model Question {
   tags    QuestionTag[]
   history QuestionHistory[]
 
+  reviewedBy User?          @relation("QuestionReviewer", fields: [reviewedById], references: [id])
+  draft      QuestionDraft?
+
   @@index([clientId])
   @@index([authorId])
+  @@index([status])
+  @@index([publishedAt])
+  @@index([status, submittedAt])
   @@index([searchVector], type: Gin, map: "Question_searchVector_idx")
   @@index([normalizedText(ops: raw("gin_trgm_ops"))], type: Gin, map: "Question_normalizedText_trgm_idx")
+}
+
+// Pending edit of an already-published question; applied on approval, deleted on rejection.
+// payload: { text, answerNotes, clientId, tags: [{ tagId, categoryId }] }
+model QuestionDraft {
+  id         String   @id @default(uuid())
+  questionId String   @unique
+  payload    Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
 }
 
 // categoryId is denormalised so a composite index can serve

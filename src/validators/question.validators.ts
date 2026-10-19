@@ -36,9 +36,23 @@ export const updateQuestionSchema = createQuestionSchema
 
 export const checkDuplicateSchema = z.object({ text: createQuestionSchema.shape.text }).strict();
 
+const reviewNote = z.string().trim().max(1000);
+
+// Requesting changes needs a note: the author has nothing to act on without one.
+export const requestChangesSchema = z.object({ note: reviewNote.min(1) }).strict();
+
+// A rejection reason is optional; an empty one is stored as no reason.
+export const rejectSchema = z
+  .object({ note: reviewNote.optional() })
+  .strict()
+  .default({})
+  .transform(({ note }) => ({ note: note || undefined }));
+
 export const questionIdParamSchema = z.object({ id: z.uuid() });
 
 export type UpdateQuestionInput = z.infer<typeof updateQuestionSchema>;
+export type RequestChangesInput = z.infer<typeof requestChangesSchema>;
+export type RejectInput = z.output<typeof rejectSchema>;
 export type CheckDuplicateInput = z.infer<typeof checkDuplicateSchema>;
 export type CreateQuestionInput = z.infer<typeof createQuestionSchema>;
 
@@ -47,6 +61,14 @@ const idList = z
   .string()
   .transform((v) => v.split(',').map((x) => Number(x.trim())))
   .pipe(z.array(z.number().int().positive()).min(1).max(50));
+
+const questionStatus = z.enum(['PENDING_REVIEW', 'APPROVED', 'CHANGES_REQUESTED', 'REJECTED']);
+
+// "PENDING_REVIEW,REJECTED" -> ['PENDING_REVIEW', 'REJECTED']
+const statusList = z
+  .string()
+  .transform((v) => v.split(',').map((x) => x.trim()))
+  .pipe(z.array(questionStatus).min(1).max(4));
 
 export const listQuestionsQuerySchema = z
   .object({
@@ -60,3 +82,14 @@ export const listQuestionsQuerySchema = z
   .strict();
 
 export type ListQuestionsQuery = z.infer<typeof listQuestionsQuerySchema>;
+
+export const listSubmissionsQuerySchema = z
+  .object({
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    status: statusList.optional(), // comma-separated; default: everything that is not live yet
+    sort: z.enum(['submitted_asc', 'submitted_desc']).optional(), // default: reviewers oldest first, authors newest first
+  })
+  .strict();
+
+export type ListSubmissionsQuery = z.infer<typeof listSubmissionsQuerySchema>;

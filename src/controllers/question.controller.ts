@@ -1,6 +1,6 @@
 import type { RequestHandler } from 'express';
 import * as questionService from '../services/question.service.js';
-import { listQuestionsQuerySchema, questionIdParamSchema } from '../validators/question.validators.js';
+import { listQuestionsQuerySchema, listSubmissionsQuerySchema, questionIdParamSchema } from '../validators/question.validators.js';
 
 export const createQuestion: RequestHandler = async (req, res, next) => {
   try {
@@ -40,6 +40,59 @@ export const getQuestion: RequestHandler = async (req, res, next) => {
   try {
     const { id } = questionIdParamSchema.parse(req.params);
     res.json(await questionService.getQuestion(req.user!, id));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const approveQuestion: RequestHandler = async (req, res, next) => {
+  try {
+    const { id } = questionIdParamSchema.parse(req.params);
+    res.json(await questionService.approveQuestion(req.user!, id));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const requestChanges: RequestHandler = async (req, res, next) => {
+  try {
+    const { id } = questionIdParamSchema.parse(req.params);
+    res.json(await questionService.requestChanges(req.user!, id, req.body));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const rejectQuestion: RequestHandler = async (req, res, next) => {
+  try {
+    const { id } = questionIdParamSchema.parse(req.params);
+    res.json(await questionService.rejectQuestion(req.user!, id, req.body));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const countQuestions: RequestHandler = async (req, res, next) => {
+  try {
+    res.json(await questionService.countQuestions(req.user!));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getQuestionHistory: RequestHandler = async (req, res, next) => {
+  try {
+    const { id } = questionIdParamSchema.parse(req.params);
+    res.json(await questionService.getQuestionHistory(req.user!, id));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const listSubmissions: RequestHandler = async (req, res, next) => {
+  try {
+    const query = listSubmissionsQuerySchema.parse(req.query);
+    res.json(await questionService.listSubmissions(req.user!, query));
   } catch (err) {
     next(err);
   }
