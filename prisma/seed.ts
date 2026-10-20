@@ -2,13 +2,16 @@ import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../src/generated/prisma/client.js';
-import { normalizeText } from '../src/utils/normalize.js';
 
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }),
 });
 
-const PASSWORD = 'password123';
+function requireEnv(key: string): string {
+  const value = process.env[key];
+  if (!value) throw new Error(`Missing required env var ${key}`);
+  return value;
+}
 
 const taxonomy: Record<string, { name: string; tags: string[] }> = {
   technology: { name: 'Technology', tags: ['react', 'node', 'postgres', 'typescript', 'docker'] },
@@ -24,7 +27,9 @@ const rolePermissions: Record<string, string[]> = {
 };
 
 async function main() {
-  const passwordHash = await bcrypt.hash(PASSWORD, 10);
+  const adminEmail = requireEnv('SEED_ADMIN_EMAIL');
+  const adminName = requireEnv('SEED_ADMIN_NAME');
+  const adminPassword = requireEnv('SEED_ADMIN_PASSWORD');
 
   const permissionCodes = [...new Set(Object.values(rolePermissions).flat())];
   const permissions = new Map<string, number>();
@@ -46,101 +51,30 @@ async function main() {
     }
   }
 
-  const users = await Promise.all(
-    (
-      [
-        ['reviewer@example.com', 'Riya Reviewer', 'REVIEWER'],
-        ['admin@example.com', 'Sam Super', 'SUPER_ADMIN'],
-        ['user@example.com', 'Uma User', 'USER'],
-        ['acme-user@example.com', 'Adam Acme', 'USER'],
-      ] as const
-    ).map(([email, name, role]) =>
-      prisma.user.upsert({
-        where: { email },
-        update: {},
-        create: { email, name, roleId: roles.get(role)!, passwordHash },
-      }),
-    ),
-  );
-  const byEmail = Object.fromEntries(users.map((u) => [u.email, u]));
-
-  const [acme, globex] = await Promise.all(
-    ['Acme Corp', 'Globex'].map((name) =>
-      prisma.client.upsert({ where: { name }, update: {}, create: { name } }),
-    ),
-  );
-
-  // Only acme-user is granted Acme. Reviewer deliberately have no grants
-  // (roles are independent of client permission).
-  await prisma.clientPermission.upsert({
-    where: { userId_clientId: { userId: byEmail['acme-user@example.com']!.id, clientId: acme!.id } },
+  // The only seeded user: the super admin, needed to bootstrap everything else.
+  await prisma.user.upsert({
+    where: { email: adminEmail },
     update: {},
-    create: { userId: byEmail['acme-user@example.com']!.id, clientId: acme!.id },
+    create: {
+      email: adminEmail,
+      name: adminName,
+      roleId: roles.get('SUPER_ADMIN')!,
+      passwordHash: await bcrypt.hash(adminPassword, 10),
+    },
   });
 
-  const tagIds = new Map<string, { id: number; categoryId: number }>();
   for (const [slug, { name, tags }] of Object.entries(taxonomy)) {
     const category = await prisma.tagCategory.upsert({ where: { slug }, update: {}, create: { slug, name } });
     for (const tagSlug of tags) {
-      const tag = await prisma.tag.upsert({
+      await prisma.tag.upsert({
         where: { categoryId_slug: { categoryId: category.id, slug: tagSlug } },
         update: {},
         create: { categoryId: category.id, slug: tagSlug, name: tagSlug },
       });
-      tagIds.set(`${slug}:${tagSlug}`, { id: tag.id, categoryId: category.id });
     }
   }
 
-  if ((await prisma.question.count()) === 0) {
-    const samples = [
-      { text: 'Explain the difference between useMemo and useCallback.', notes: 'Memoised value vs memoised function; both avoid recomputation on unchanged deps.', client: null, tags: ['technology:react', 'seniority:mid', 'question-type:conceptual'] },
-      { text: 'How does the Node.js event loop work?', notes: 'Phases: timers, pending, poll, check, close. Microtasks run between phases.', client: null, tags: ['technology:node', 'seniority:senior', 'question-type:conceptual'] },
-      { text: 'Write a query to find duplicate emails in a users table.', notes: 'GROUP BY email HAVING COUNT(*) > 1.', client: null, tags: ['technology:postgres', 'seniority:junior', 'question-type:coding'] },
-      { text: 'Describe how you would migrate the Acme billing monolith to services.', notes: 'Confidential Acme context: strangler pattern around the invoicing module.', client: acme!.id, tags: ['technology:node', 'seniority:senior', 'question-type:system-design'] },
-      { text: 'Globex asks candidates to design a multi-tenant reporting pipeline.', notes: 'Confidential Globex context: partition by tenant id.', client: globex!.id, tags: ['technology:postgres', 'seniority:senior', 'question-type:system-design'] },
-      { text: 'What is the difference between a process and a thread?', notes: 'Memory isolation vs shared address space; cost of context switching.', client: null, tags: ['technology:node', 'seniority:junior', 'question-type:conceptual'] },
-      { text: 'Tell me about a time you disagreed with a teammate.', notes: '', client: null, tags: ['seniority:mid', 'question-type:behavioural'] },
-    ];
-    // The first five are live; the last two sit in the review queue, one waiting and one sent back.
-    const reviewer = byEmail['reviewer@example.com']!;
-    const reviewStates = [
-      { status: 'APPROVED', published: true },
-      { status: 'APPROVED', published: true },
-      { status: 'APPROVED', published: true },
-      { status: 'APPROVED', published: true },
-      { status: 'APPROVED', published: true },
-      { status: 'PENDING_REVIEW', published: false },
-      { status: 'CHANGES_REQUESTED', published: false, note: 'Add what a strong answer covers, not just the topic.' },
-    ] as const;
-    for (const [i, s] of samples.entries()) {
-      const state = reviewStates[i]!;
-      const note = 'note' in state ? state.note : null;
-      await prisma.question.create({
-        data: {
-          status: state.status,
-          publishedAt: state.published ? new Date() : null,
-          ...(state.status !== 'PENDING_REVIEW' && { reviewedById: reviewer.id, reviewedAt: new Date() }),
-          reviewNote: note,
-          text: s.text,
-          normalizedText: normalizeText(s.text),
-          answerNotes: s.notes,
-          clientId: s.client,
-          authorId: byEmail['user@example.com']!.id,
-          tags: {
-            create: s.tags.map((key) => {
-              const t = tagIds.get(key)!;
-              return { tagId: t.id, categoryId: t.categoryId };
-            }),
-          },
-          history: {
-            create: { actorId: byEmail['user@example.com']!.id, action: 'CREATED', changes: { text: s.text } },
-          },
-        },
-      });
-    }
-  }
-
-  console.log(`Seeded. All users share the password "${PASSWORD}".`);
+  console.log(`Seeded roles, permissions, tag taxonomy and super admin (${adminEmail}).`);
 }
 
 main()
