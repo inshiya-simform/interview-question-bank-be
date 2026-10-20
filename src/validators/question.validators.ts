@@ -83,6 +83,11 @@ export const listQuestionsQuerySchema = z
 
 export type ListQuestionsQuery = z.infer<typeof listQuestionsQuerySchema>;
 
+// Same filters as the list, without pagination: an export covers every matching question.
+export const exportQuestionsQuerySchema = listQuestionsQuerySchema.omit({ page: true, limit: true });
+
+export type ExportQuestionsQuery = z.infer<typeof exportQuestionsQuerySchema>;
+
 export const listSubmissionsQuerySchema = z
   .object({
     page: z.coerce.number().int().min(1).default(1),

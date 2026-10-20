@@ -1,7 +1,13 @@
 import type { RequestHandler } from 'express';
 import * as questionService from '../services/question.service.js';
+import * as questionExportService from '../services/questionExport.service.js';
 import * as questionImportService from '../services/questionImport.service.js';
-import { listQuestionsQuerySchema, listSubmissionsQuerySchema, questionIdParamSchema } from '../validators/question.validators.js';
+import {
+  exportQuestionsQuerySchema,
+  listQuestionsQuerySchema,
+  listSubmissionsQuerySchema,
+  questionIdParamSchema,
+} from '../validators/question.validators.js';
 
 export const createQuestion: RequestHandler = async (req, res, next) => {
   try {
@@ -28,7 +34,26 @@ export const listQuestions: RequestHandler = async (req, res, next) => {
   }
 };
 
-export const updateQuestion: RequestHandler = async (req, res, next) => {
+export const exportQuestions: RequestHandler = async (req, res, next) => {
+  try {
+    const query = exportQuestionsQuerySchema.parse(req.query);
+    // Fails here, before anything is written, if the result is too large.
+    const { rows } = await questionService.exportQuestions(req.user!, query);
+
+    res
+      .type('text/csv; charset=utf-8')
+      .set('Content-Disposition', `attachment; filename="questions-${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.write(questionExportService.csvHeader());
+    for await (const q of rows) res.write(questionExportService.csvRow(q));
+    res.end();
+  } catch (err) {
+    // Headers already sent: the download can't be turned into an error response, so cut it off.
+    if (res.headersSent) res.destroy(err as Error);
+    else next(err);
+  }
+};
+
+export const updateQuestion:RequestHandler = async (req, res, next) => {
   try {
     const { id } = questionIdParamSchema.parse(req.params);
     res.json(await questionService.updateQuestion(req.user!, id, req.body));

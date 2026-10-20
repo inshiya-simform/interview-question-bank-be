@@ -5,6 +5,7 @@ import {
   countQuestions,
   createQuestion,
   downloadImportTemplate,
+  exportQuestions,
   getQuestion,
   getQuestionHistory,
   importQuestions,
@@ -33,6 +34,7 @@ router.use(authenticate);
 router.get('/', requirePermission('question:read'), listQuestions);
 router.get('/submissions', requirePermission('question:read'), listSubmissions);
 router.get('/counts', requirePermission('question:read'), countQuestions);
+router.get('/export', requirePermission('question:read'), exportQuestions);
 router.get('/:id', requirePermission('question:read'), getQuestion);
 router.get('/:id/history', requirePermission('question:read'), getQuestionHistory);
 router.post('/', requirePermission('question:create'), validate(createQuestionSchema), createQuestion);
