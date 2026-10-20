@@ -4,8 +4,10 @@ import {
   checkDuplicate,
   countQuestions,
   createQuestion,
+  downloadImportTemplate,
   getQuestion,
   getQuestionHistory,
+  importQuestions,
   listQuestions,
   listSubmissions,
   rejectQuestion,
@@ -14,6 +16,7 @@ import {
 } from '../controllers/question.controller.js';
 import { authenticate } from '../middlewares/authenticate.js';
 import { requirePermission } from '../middlewares/requirePermission.js';
+import { uploadCsv } from '../middlewares/uploadCsv.js';
 import { validate } from '../middlewares/validate.js';
 import {
   checkDuplicateSchema,
@@ -33,6 +36,8 @@ router.get('/counts', requirePermission('question:read'), countQuestions);
 router.get('/:id', requirePermission('question:read'), getQuestion);
 router.get('/:id/history', requirePermission('question:read'), getQuestionHistory);
 router.post('/', requirePermission('question:create'), validate(createQuestionSchema), createQuestion);
+router.get('/import/template', requirePermission('question:create'), downloadImportTemplate);
+router.post('/import', requirePermission('question:create'), uploadCsv, importQuestions);
 router.post('/check-duplicate', requirePermission('question:create'), validate(checkDuplicateSchema), checkDuplicate);
 router.patch(
   '/:id',

@@ -93,3 +93,25 @@ export const listSubmissionsQuerySchema = z
   .strict();
 
 export type ListSubmissionsQuery = z.infer<typeof listSubmissionsQuerySchema>;
+
+// One CSV row, exactly as read: every cell is a string. Tags and client are slugs/names that the
+// import service resolves to ids; the cell-level rules mirror createQuestionSchema.
+export const CSV_COLUMNS = ['text', 'answer_notes', 'client', 'tags', 'confirm_distinct', 'distinct_reason'] as const;
+export const CSV_REQUIRED_COLUMNS = ['text', 'answer_notes', 'tags'] as const;
+export const MAX_IMPORT_ROWS = 500;
+
+export const csvQuestionRowSchema = z
+  .object({
+    text: createQuestionSchema.shape.text,
+    answer_notes: createQuestionSchema.shape.answerNotes,
+    client: z.string().trim().max(200),
+    tags: z.string().trim().min(1, 'At least one tag is required'),
+    confirm_distinct: z.enum(['', 'true', 'false'], {
+      error: 'Must be true or false (if this holds a tag, separate tag groups in the tags column with ";", not ",")',
+    }),
+    distinct_reason: createQuestionSchema.shape.distinctReason.unwrap(),
+  })
+  .partial({ client: true, confirm_distinct: true, distinct_reason: true })
+  .strict();
+
+export type CsvQuestionRow = z.infer<typeof csvQuestionRowSchema>;
