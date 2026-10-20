@@ -614,6 +614,27 @@ export const openApiSpec = {
         },
       },
     },
+    '/questions/export': {
+      get: {
+        tags: ['Questions'],
+        summary: 'Export questions as CSV (requires question:read)',
+        description:
+          'Downloads every question that GET /questions would list for the same filters, ignoring pagination. Columns: text, answer_notes, client, tags (same format as the import, so the file can be imported again). Fails with 400 if more than 10,000 questions match: narrow the filters.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'clientId', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Only questions of this client' },
+          { name: 'tags', in: 'query', schema: { type: 'string', example: '1,2' }, description: 'Comma-separated tag ids; matches questions with any of them' },
+          { name: 'categories', in: 'query', schema: { type: 'string', example: '1,3' }, description: 'Comma-separated category ids; matches questions with a tag in any of them' },
+          { name: 'search', in: 'query', schema: { type: 'string', maxLength: 200 }, description: 'Full-text search over question text and answer notes' },
+        ],
+        responses: {
+          '200': { description: 'CSV file, newest question first', content: { 'text/csv': { schema: { type: 'string' } } } },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+        },
+      },
+    },
     '/questions/{id}': {
       get: {
         tags: ['Questions'],

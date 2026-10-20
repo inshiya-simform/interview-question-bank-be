@@ -1,4 +1,5 @@
 import { env } from '../config/env.js';
+import { EXPORT_BATCH_SIZE, MAX_EXPORT_ROWS } from '../constants/export.constants.js';
 import { prisma } from '../db/prisma.js';
 import type { Prisma, QuestionStatus } from '../generated/prisma/client.js';
 import type { AuthUser } from '../types/express.js';
@@ -7,6 +8,7 @@ import { normalizeText } from '../utils/normalize.js';
 import type {
   CheckDuplicateInput,
   CreateQuestionInput,
+  ExportQuestionsQuery,
   ListQuestionsQuery,
   ListSubmissionsQuery,
   RejectInput,
@@ -170,10 +172,11 @@ function liveFilter(user: AuthUser): Prisma.QuestionWhereInput {
   };
 }
 
-export async function listQuestions(
+// Shared by the list and the export so both always cover the same set of questions.
+async function buildListWhere(
   user: AuthUser,
-  { page, limit, clientId, tags, categories, search }: ListQuestionsQuery,
-) {
+  { clientId, tags, categories, search }: ExportQuestionsQuery,
+): Promise<Prisma.QuestionWhereInput> {
   const filters: Prisma.QuestionWhereInput[] = [liveFilter(user)];
 
   // Filters narrow the visible set; they can never widen it.
@@ -188,7 +191,11 @@ export async function listQuestions(
     filters.push({ id: { in: matches.map((m) => m.id) } });
   }
 
-  const where: Prisma.QuestionWhereInput = { AND: filters };
+  return { AND: filters };
+}
+
+export async function listQuestions(user: AuthUser, { page, limit, ...filters }: ListQuestionsQuery) {
+  const where = await buildListWhere(user, filters);
 
   const [total, rows] = await prisma.$transaction([
     prisma.question.count({ where }),
@@ -202,6 +209,36 @@ export async function listQuestions(
   ]);
 
   return { questions: rows.map((q) => toQuestionDto(user, q)), page, limit, total };
+}
+
+// Every question matching the filters, ignoring pagination. Rejects before returning if the result
+// is too large, so the caller can still send an error response before it starts streaming.
+export async function exportQuestions(user: AuthUser, query: ExportQuestionsQuery) {
+  const where = await buildListWhere(user, query);
+
+  const total = await prisma.question.count({ where });
+  if (total > MAX_EXPORT_ROWS) {
+    throw new AppError(
+      400,
+      'VALIDATION_ERROR',
+      `Too many questions to export (${total}). Narrow your filters to at most ${MAX_EXPORT_ROWS}.`,
+    );
+  }
+
+  async function* rows() {
+    for (let skip = 0; skip < total; skip += EXPORT_BATCH_SIZE) {
+      const batch = await prisma.question.findMany({
+        where,
+        include: questionInclude,
+        orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+        skip,
+        take: EXPORT_BATCH_SIZE,
+      });
+      for (const q of batch) yield toQuestionDto(user, q);
+    }
+  }
+
+  return { total, rows: rows() };
 }
 
 const NOT_LIVE: QuestionStatus[] = ['PENDING_REVIEW', 'CHANGES_REQUESTED', 'REJECTED'];
