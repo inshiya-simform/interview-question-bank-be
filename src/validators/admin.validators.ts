@@ -17,6 +17,12 @@ export const listUsersQuerySchema = z
     limit: z.coerce.number().int().min(1).max(100).default(20),
     // matches user name or email
     search: z.string().trim().min(1).max(200).optional(),
+    role: z.enum(['REVIEWER', 'USER']).optional(),
+    // query strings are text, so z.coerce.boolean() would treat "false" as true
+    excludeAdmin: z
+      .enum(['true', 'false'])
+      .transform((v) => v === 'true')
+      .optional(),
   })
   .strict();
 

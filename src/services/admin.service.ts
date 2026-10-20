@@ -33,15 +33,17 @@ const toUserDto = (u: UserRow) => ({
   clients: u.permissions.map((p) => p.client).sort((a, b) => a.name.localeCompare(b.name)),
 });
 
-export async function listUsers({ page, limit, search }: ListUsersQuery) {
-  const where: Prisma.UserWhereInput = search
-    ? {
-        OR: [
-          { name: { contains: search, mode: 'insensitive' } },
-          { email: { contains: search, mode: 'insensitive' } },
-        ],
-      }
-    : {};
+export async function listUsers({ page, limit, search, role, excludeAdmin }: ListUsersQuery) {
+  const where: Prisma.UserWhereInput = {
+    ...(search && {
+      OR: [
+        { name: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ],
+    }),
+    ...(role && { role: { name: role } }),
+    ...(excludeAdmin && { role: { name: role ?? { not: 'SUPER_ADMIN' } } }),
+  };
   const [total, users] = await prisma.$transaction([
     prisma.user.count({ where }),
     prisma.user.findMany({
