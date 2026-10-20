@@ -556,6 +556,64 @@ export const openApiSpec = {
         },
       },
     },
+    '/questions/import': {
+      post: {
+        tags: ['Questions'],
+        summary: 'Bulk-create questions from a CSV file (requires question:create)',
+        description:
+          'Multipart upload, field "file" (.csv, max 2 MB, max 500 rows). Columns: text, answer_notes, tags (required); client, confirm_distinct, distinct_reason (optional). tags = "category:tag|tag;category:tag" using slugs; client = client name (must be one you hold a grant on). Every question is created as PENDING_REVIEW. All-or-nothing: if any row is invalid nothing is stored and error.details lists { row, column, message } (row 1 is the header). Suspected duplicates fail unless confirm_distinct is true with a distinct_reason.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                required: ['file'],
+                properties: { file: { type: 'string', format: 'binary' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Questions created and sent to review',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    imported: { type: 'integer' },
+                    questions: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: { id: { type: 'string', format: 'uuid' }, text: { type: 'string' } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+        },
+      },
+    },
+    '/questions/import/template': {
+      get: {
+        tags: ['Questions'],
+        summary: 'Download a sample import CSV (requires question:create)',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': { description: 'CSV header plus one example row', content: { 'text/csv': { schema: { type: 'string' } } } },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+        },
+      },
+    },
     '/questions/{id}': {
       get: {
         tags: ['Questions'],
