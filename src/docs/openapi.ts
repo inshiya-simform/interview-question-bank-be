@@ -158,6 +158,13 @@ export const openApiSpec = {
           { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
           { name: 'search', in: 'query', schema: { type: 'string' } },
+          { name: 'role', in: 'query', schema: { type: 'string', enum: ['REVIEWER', 'USER'] } },
+          {
+            name: 'excludeAdmin',
+            in: 'query',
+            description: 'When true, SUPER_ADMIN users are omitted.',
+            schema: { type: 'boolean' },
+          },
         ],
         responses: {
           '200': {
