@@ -1,5 +1,6 @@
 import { env } from '../config/env.js';
 import { EXPORT_BATCH_SIZE, MAX_EXPORT_ROWS } from '../constants/export.constants.js';
+import { REVIEW_LOCK_TTL_MS } from '../constants/review.constants.js';
 import { prisma } from '../db/prisma.js';
 import type { Prisma, QuestionStatus } from '../generated/prisma/client.js';
 import type { AuthUser } from '../types/express.js';
@@ -458,6 +459,49 @@ export const bulkApproveQuestions = (user: AuthUser, { ids, expectedUpdatedAt }:
 export const bulkRejectQuestions = (user: AuthUser, { ids, note, expectedUpdatedAt }: BulkRejectInput) =>
   bulkReview(user, ids, { kind: 'reject', note }, expectedUpdatedAt);
 
+const lockSelect = {
+  status: true,
+  updatedAt: true,
+  reviewLock: { select: { expiresAt: true, lockedBy: { select: { id: true, name: true } } } },
+} satisfies Prisma.QuestionSelect;
+
+// What a review screen needs to stay current: poll this, or take it from the lock calls below.
+async function reviewState(id: string) {
+  const q = await prisma.question.findUnique({ where: { id }, select: lockSelect });
+  if (!q) throw new AppError(404, 'NOT_FOUND', 'Question not found');
+  return { status: q.status, updatedAt: q.updatedAt, reviewLock: activeLock(q.reviewLock) };
+}
+
+export const getReviewState = (_user: AuthUser, id: string) => reviewState(id);
+
+// Claims the question for the caller, or renews their claim (call it as a heartbeat). One statement,
+// so two reviewers racing for a free question can't both get it. Takes over a lapsed claim.
+export async function acquireReviewLock(user: AuthUser, id: string) {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + REVIEW_LOCK_TTL_MS);
+  // Times are passed in rather than using now(), so they compare in UTC like the rest of Prisma's timestamps.
+  const taken = await prisma.$executeRaw`
+    INSERT INTO "QuestionReviewLock" ("questionId", "lockedById", "expiresAt")
+    SELECT q."id", ${user.id}, ${expiresAt} FROM "Question" q
+    WHERE q."id" = ${id} AND q."status" = 'PENDING_REVIEW'
+    ON CONFLICT ("questionId") DO UPDATE
+      SET "lockedById" = EXCLUDED."lockedById", "expiresAt" = EXCLUDED."expiresAt", "createdAt" = ${now}
+      WHERE "QuestionReviewLock"."lockedById" = EXCLUDED."lockedById" OR "QuestionReviewLock"."expiresAt" < ${now}`;
+  if (taken === 1) return reviewState(id);
+
+  const state = await reviewState(id);
+  if (state.status !== 'PENDING_REVIEW') throw await reviewConflict(id);
+  throw new AppError(409, 'LOCKED', `${state.reviewLock?.lockedBy.name ?? 'Another reviewer'} is reviewing this question`, {
+    reason: 'LOCKED',
+    ...state.reviewLock,
+  });
+}
+
+// Only the holder can let go; anything else is a no-op, so a late release never frees someone else's claim.
+export async function releaseReviewLock(user: AuthUser, id: string) {
+  await prisma.questionReviewLock.deleteMany({ where: { questionId: id, lockedById: user.id } });
+}
+
 type ReviewAction =
   | { kind: 'approve' }
   | { kind: 'requestChanges'; note: string }
@@ -531,6 +575,19 @@ async function applyReview(user: AuthUser, id: string, action: ReviewAction, exp
   }
 
   await prisma.$transaction(async (tx) => {
+    // Another reviewer's live claim blocks the decision; a lapsed one doesn't.
+    const lock = await tx.questionReviewLock.findUnique({
+      where: { questionId: id },
+      include: { lockedBy: { select: { id: true, name: true } } },
+    });
+    if (lock && lock.lockedById !== user.id && lock.expiresAt > now) {
+      throw new AppError(409, 'LOCKED', `${lock.lockedBy.name} is reviewing this question`, {
+        reason: 'LOCKED',
+        lockedBy: lock.lockedBy,
+        expiresAt: lock.expiresAt,
+      });
+    }
+
     // Re-checks status and version in the write itself, so two reviewers can't both act on one
     // submission and an edit made since the read above can't slip through.
     const claimed = await tx.question.updateMany({
@@ -544,6 +601,7 @@ async function applyReview(user: AuthUser, id: string, action: ReviewAction, exp
       },
     });
     if (claimed.count === 0) throw await reviewConflict(id);
+    await tx.questionReviewLock.deleteMany({ where: { questionId: id } });
 
     if (draft && action.kind === 'approve') await replaceContent(tx, id, draft);
     // Approved: applied above. Rejected: turned down. Either way the draft is done.
@@ -579,6 +637,7 @@ const questionInclude = {
   reviewedBy: { select: { id: true, name: true } },
   author: { select: { id: true, name: true } },
   draft: true,
+  reviewLock: { select: { expiresAt: true, lockedBy: { select: { id: true, name: true } } } },
 } satisfies Prisma.QuestionInclude;
 
 type QuestionRow = Prisma.QuestionGetPayload<{ include: typeof questionInclude }>;
@@ -624,7 +683,15 @@ function toQuestionDto(user: AuthUser, q: QuestionRow) {
       reviewedAt: q.reviewedAt,
       hasDraft: q.draft !== null,
     }),
+    // Reviewers see who else is on it; null when nobody is, or the claim has lapsed.
+    ...(user.permissions.includes('question:review') && { reviewLock: activeLock(q.reviewLock) }),
   };
+}
+
+type LockRow = { expiresAt: Date; lockedBy: { id: string; name: string } } | null;
+
+function activeLock(lock: LockRow) {
+  return lock && lock.expiresAt > new Date() ? { lockedBy: lock.lockedBy, expiresAt: lock.expiresAt } : null;
 }
 
 // Adds each pending edit, resolved to the same shape as the live content. Author and reviewers only.

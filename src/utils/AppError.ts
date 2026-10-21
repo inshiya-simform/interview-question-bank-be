@@ -4,6 +4,7 @@ export type ErrorCode =
   | 'FORBIDDEN'
   | 'NOT_FOUND'
   | 'CONFLICT'
+  | 'LOCKED'
   | 'DUPLICATE_SUSPECTED'
   | 'INTERNAL_ERROR';
 

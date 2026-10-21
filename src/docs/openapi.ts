@@ -757,6 +757,49 @@ export const openApiSpec = {
         },
       },
     },
+    '/questions/{id}/review-state': {
+      get: {
+        tags: ['Questions'],
+        summary: 'Current review state of a question (requires question:review)',
+        description: 'Light poll for an open review screen: status, the updatedAt to send back as expectedUpdatedAt, and who holds the review lock (null when nobody, or the claim has lapsed).',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': { description: 'Review state', content: { 'application/json': { schema: { $ref: '#/components/schemas/ReviewState' } } } },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
+    '/questions/{id}/review-lock': {
+      post: {
+        tags: ['Questions'],
+        summary: 'Claim a question for review, or renew your claim (requires question:review)',
+        description: 'Soft lock for 5 minutes. Call when the review screen opens and about every minute after as a heartbeat. Other reviewers cannot approve, reject or request changes while the claim is live. A lapsed claim can be taken over. The lock is cleared when the question is reviewed.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': { description: 'You hold the lock', content: { 'application/json': { schema: { $ref: '#/components/schemas/ReviewState' } } } },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+          '409': { description: 'Locked by another reviewer (code LOCKED), or no longer pending review (details.reason ALREADY_REVIEWED)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+      delete: {
+        tags: ['Questions'],
+        summary: 'Release your claim on a question (requires question:review)',
+        description: 'Call when the reviewer closes the review screen. Releasing a claim you do not hold does nothing.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '204': { description: 'Released' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+        },
+      },
+    },
     '/questions/{id}/approve': {
       post: {
         tags: ['Questions'],
@@ -771,7 +814,7 @@ export const openApiSpec = {
           '401': { $ref: '#/components/responses/Unauthorized' },
           '403': { $ref: '#/components/responses/Forbidden' },
           '404': { $ref: '#/components/responses/NotFound' },
-          '409': { description: 'Already reviewed by someone else, or edited since you loaded it (see error.details.reason)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'Already reviewed, edited since you loaded it, or locked by another reviewer (see error.code and error.details.reason)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },
@@ -789,7 +832,7 @@ export const openApiSpec = {
           '401': { $ref: '#/components/responses/Unauthorized' },
           '403': { $ref: '#/components/responses/Forbidden' },
           '404': { $ref: '#/components/responses/NotFound' },
-          '409': { description: 'Already reviewed by someone else, or edited since you loaded it (see error.details.reason)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'Already reviewed, edited since you loaded it, or locked by another reviewer (see error.code and error.details.reason)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },
@@ -807,7 +850,7 @@ export const openApiSpec = {
           '401': { $ref: '#/components/responses/Unauthorized' },
           '403': { $ref: '#/components/responses/Forbidden' },
           '404': { $ref: '#/components/responses/NotFound' },
-          '409': { description: 'Already reviewed by someone else, or edited since you loaded it (see error.details.reason)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'Already reviewed, edited since you loaded it, or locked by another reviewer (see error.code and error.details.reason)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },
@@ -1045,11 +1088,28 @@ export const openApiSpec = {
           },
         },
       },
+      ReviewState: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['PENDING_REVIEW', 'APPROVED', 'CHANGES_REQUESTED', 'REJECTED'] },
+          updatedAt: { type: 'string', format: 'date-time' },
+          reviewLock: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              lockedBy: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } },
+              expiresAt: { type: 'string', format: 'date-time' },
+            },
+          },
+        },
+      },
       ReviewConflictDetails: {
         type: 'object',
         description: 'Why a review was refused with 409',
         properties: {
-          reason: { type: 'string', enum: ['ALREADY_REVIEWED', 'EDITED_SINCE_LOADED'] },
+          reason: { type: 'string', enum: ['ALREADY_REVIEWED', 'EDITED_SINCE_LOADED', 'LOCKED'] },
+          lockedBy: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } }, description: 'LOCKED' },
+          expiresAt: { type: 'string', format: 'date-time', description: 'LOCKED: when the claim lapses' },
           status: { type: 'string', enum: ['PENDING_REVIEW', 'APPROVED', 'CHANGES_REQUESTED', 'REJECTED'] },
           reviewedBy: { type: 'object', nullable: true, properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } },
           reviewedAt: { type: 'string', format: 'date-time', nullable: true },

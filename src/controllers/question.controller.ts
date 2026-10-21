@@ -96,6 +96,34 @@ export const bulkRejectQuestions: RequestHandler = async (req, res, next) => {
   }
 };
 
+export const getReviewState: RequestHandler = async (req, res, next) => {
+  try {
+    const { id } = questionIdParamSchema.parse(req.params);
+    res.json(await questionService.getReviewState(req.user!, id));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const acquireReviewLock: RequestHandler = async (req, res, next) => {
+  try {
+    const { id } = questionIdParamSchema.parse(req.params);
+    res.json(await questionService.acquireReviewLock(req.user!, id));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const releaseReviewLock: RequestHandler = async (req, res, next) => {
+  try {
+    const { id } = questionIdParamSchema.parse(req.params);
+    await questionService.releaseReviewLock(req.user!, id);
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const requestChanges: RequestHandler = async (req, res, next) => {
   try {
     const { id } = questionIdParamSchema.parse(req.params);

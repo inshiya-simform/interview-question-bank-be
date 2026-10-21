@@ -65,6 +65,7 @@ model User {
   permissions       ClientPermission[]
   history           QuestionHistory[]
   reviewedQuestions Question[]         @relation("QuestionReviewer")
+  reviewLocks       QuestionReviewLock[]
 }
 
 model Client {
@@ -139,6 +140,7 @@ model Question {
 
   reviewedBy User?          @relation("QuestionReviewer", fields: [reviewedById], references: [id])
   draft      QuestionDraft?
+  reviewLock QuestionReviewLock?
 
   @@index([clientId])
   @@index([authorId])
@@ -159,6 +161,19 @@ model QuestionDraft {
   updatedAt  DateTime @updatedAt
 
   question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+}
+
+// Soft claim on a question that is being reviewed. A separate table (not columns on Question) so
+// taking or renewing a lock never moves Question.updatedAt, which reviewers use as a version token.
+// Expired rows are ignored and overwritten, so a closed tab never blocks a question for long.
+model QuestionReviewLock {
+  questionId String   @id
+  lockedById String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  lockedBy User     @relation(fields: [lockedById], references: [id], onDelete: Cascade)
 }
 
 // categoryId is denormalised so a composite index can serve
