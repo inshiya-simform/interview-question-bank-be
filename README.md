@@ -218,6 +218,8 @@ Base path `/api/v1`. JSON in/out. Auth via `Authorization: Bearer <JWT>`.
 | GET | `/questions/:id` | any | One question (404 if not visible) |
 | POST | `/questions` | `question:create` | Create (runs duplicate check) |
 | PATCH | `/questions/:id` | `question:edit_own` (own questions) | Edit; an approved question goes back to review as a draft |
+| POST | `/questions/bulk/approve` | `question:review` | Body `{ ids }` (1–50 UUIDs). Reviews each independently; returns `{ succeeded: [ids], failed: [{ id, code, message }] }` |
+| POST | `/questions/bulk/reject` | `question:review` | Body `{ ids, note? }`; same response as bulk approve |
 | POST | `/questions/:id/approve` | `question:review` | Approve (applies a pending draft) |
 | POST | `/questions/:id/request-changes` | `question:review` | Body `{ note }` (required, max 1000); sends it back to the author |
 | POST | `/questions/:id/reject` | `question:review` | Body `{ note? }` (optional reason, max 1000) |

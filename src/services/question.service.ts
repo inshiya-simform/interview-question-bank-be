@@ -11,6 +11,8 @@ import type {
   ExportQuestionsQuery,
   ListQuestionsQuery,
   ListSubmissionsQuery,
+  BulkRejectInput,
+  BulkReviewInput,
   RejectInput,
   RequestChangesInput,
   UpdateQuestionInput,
@@ -428,13 +430,39 @@ export const requestChanges = (user: AuthUser, id: string, { note }: RequestChan
 export const rejectQuestion = (user: AuthUser, id: string, { note }: RejectInput) =>
   review(user, id, { kind: 'reject', note });
 
+// Each question is reviewed on its own, so one that is missing or no longer pending doesn't block the rest.
+async function bulkReview(user: AuthUser, ids: string[], action: ReviewAction) {
+  const succeeded: string[] = [];
+  const failed: { id: string; code: string; message: string }[] = [];
+  for (const id of ids) {
+    try {
+      await applyReview(user, id, action);
+      succeeded.push(id);
+    } catch (err) {
+      if (!(err instanceof AppError)) throw err;
+      failed.push({ id, code: err.code, message: err.message });
+    }
+  }
+  return { succeeded, failed };
+}
+
+export const bulkApproveQuestions = (user: AuthUser, { ids }: BulkReviewInput) =>
+  bulkReview(user, ids, { kind: 'approve' });
+export const bulkRejectQuestions = (user: AuthUser, { ids, note }: BulkRejectInput) =>
+  bulkReview(user, ids, { kind: 'reject', note });
+
 type ReviewAction =
   | { kind: 'approve' }
   | { kind: 'requestChanges'; note: string }
   | { kind: 'reject'; note: string | undefined };
 
-// Any reviewer may act, but only on a question that is waiting for review.
 async function review(user: AuthUser, id: string, action: ReviewAction) {
+  await applyReview(user, id, action);
+  return getQuestion(user, id);
+}
+
+// Any reviewer may act, but only on a question that is waiting for review.
+async function applyReview(user: AuthUser, id: string, action: ReviewAction) {
   const existing = await prisma.question.findUnique({ where: { id }, include: { draft: true } });
   if (!existing) throw new AppError(404, 'NOT_FOUND', 'Question not found');
   if (existing.status !== 'PENDING_REVIEW') {
@@ -494,8 +522,6 @@ async function review(user: AuthUser, id: string, action: ReviewAction) {
       data: { questionId: id, actorId: user.id, action: historyAction, changes },
     });
   });
-
-  return getQuestion(user, id);
 }
 
 // Writes content onto the question row and replaces its tag set.
