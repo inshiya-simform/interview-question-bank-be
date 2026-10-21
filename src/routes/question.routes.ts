@@ -23,6 +23,7 @@ import { uploadCsv } from '../middlewares/uploadCsv.js';
 import { validate } from '../middlewares/validate.js';
 import {
   bulkRejectSchema,
+  approveSchema,
   bulkReviewSchema,
   checkDuplicateSchema,
   createQuestionSchema,
@@ -56,7 +57,7 @@ router.patch(
 // Registered before the '/:id/...' routes so "bulk" is never read as an id.
 router.post('/bulk/approve', requirePermission('question:review'), validate(bulkReviewSchema), bulkApproveQuestions);
 router.post('/bulk/reject', requirePermission('question:review'), validate(bulkRejectSchema), bulkRejectQuestions);
-router.post('/:id/approve', requirePermission('question:review'), approveQuestion);
+router.post('/:id/approve', requirePermission('question:review'), validate(approveSchema), approveQuestion);
 router.post('/:id/request-changes', requirePermission('question:review'), validate(requestChangesSchema), requestChanges);
 router.post('/:id/reject', requirePermission('question:review'), validate(rejectSchema), rejectQuestion);
 

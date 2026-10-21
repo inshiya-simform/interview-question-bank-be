@@ -38,15 +38,25 @@ export const checkDuplicateSchema = z.object({ text: createQuestionSchema.shape.
 
 const reviewNote = z.string().trim().max(1000);
 
+// The updatedAt the reviewer saw. When sent, the review fails if the question has changed since.
+const expectedUpdatedAt = z.iso.datetime();
+
+export const approveSchema = z
+  .object({ expectedUpdatedAt: expectedUpdatedAt.optional() })
+  .strict()
+  .default({});
+
 // Requesting changes needs a note: the author has nothing to act on without one.
-export const requestChangesSchema = z.object({ note: reviewNote.min(1) }).strict();
+export const requestChangesSchema = z
+  .object({ note: reviewNote.min(1), expectedUpdatedAt: expectedUpdatedAt.optional() })
+  .strict();
 
 // A rejection reason is optional; an empty one is stored as no reason.
 export const rejectSchema = z
-  .object({ note: reviewNote.optional() })
+  .object({ note: reviewNote.optional(), expectedUpdatedAt: expectedUpdatedAt.optional() })
   .strict()
   .default({})
-  .transform(({ note }) => ({ note: note || undefined }));
+  .transform(({ note, expectedUpdatedAt }) => ({ note: note || undefined, expectedUpdatedAt }));
 
 export const bulkReviewSchema = z
   .object({
@@ -55,16 +65,19 @@ export const bulkReviewSchema = z
       .min(1)
       .max(50)
       .refine((ids) => new Set(ids).size === ids.length, 'Each id may appear only once'),
+    // id -> updatedAt the reviewer saw; ids without an entry are not version-checked by the client.
+    expectedUpdatedAt: z.record(z.uuid(), expectedUpdatedAt).optional(),
   })
   .strict();
 
 export const bulkRejectSchema = bulkReviewSchema
   .extend({ note: reviewNote.optional() })
-  .transform(({ ids, note }) => ({ ids, note: note || undefined }));
+  .transform(({ ids, note, expectedUpdatedAt }) => ({ ids, note: note || undefined, expectedUpdatedAt }));
 
 export const questionIdParamSchema = z.object({ id: z.uuid() });
 
 export type UpdateQuestionInput = z.infer<typeof updateQuestionSchema>;
+export type ApproveInput = z.output<typeof approveSchema>;
 export type RequestChangesInput = z.infer<typeof requestChangesSchema>;
 export type BulkReviewInput = z.infer<typeof bulkReviewSchema>;
 export type BulkRejectInput = z.output<typeof bulkRejectSchema>;

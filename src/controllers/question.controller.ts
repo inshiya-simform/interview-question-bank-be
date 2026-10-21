@@ -74,7 +74,7 @@ export const getQuestion: RequestHandler = async (req, res, next) => {
 export const approveQuestion: RequestHandler = async (req, res, next) => {
   try {
     const { id } = questionIdParamSchema.parse(req.params);
-    res.json(await questionService.approveQuestion(req.user!, id));
+    res.json(await questionService.approveQuestion(req.user!, id, req.body));
   } catch (err) {
     next(err);
   }

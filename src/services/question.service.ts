@@ -11,6 +11,7 @@ import type {
   ExportQuestionsQuery,
   ListQuestionsQuery,
   ListSubmissionsQuery,
+  ApproveInput,
   BulkRejectInput,
   BulkReviewInput,
   RejectInput,
@@ -424,49 +425,80 @@ export async function getQuestion(user: AuthUser, id: string) {
   return toDetailDto(user, q);
 }
 
-export const approveQuestion = (user: AuthUser, id: string) => review(user, id, { kind: 'approve' });
-export const requestChanges = (user: AuthUser, id: string, { note }: RequestChangesInput) =>
-  review(user, id, { kind: 'requestChanges', note });
-export const rejectQuestion = (user: AuthUser, id: string, { note }: RejectInput) =>
-  review(user, id, { kind: 'reject', note });
+export const approveQuestion = (user: AuthUser, id: string, { expectedUpdatedAt }: ApproveInput) =>
+  review(user, id, { kind: 'approve' }, expectedUpdatedAt);
+export const requestChanges = (user: AuthUser, id: string, { note, expectedUpdatedAt }: RequestChangesInput) =>
+  review(user, id, { kind: 'requestChanges', note }, expectedUpdatedAt);
+export const rejectQuestion = (user: AuthUser, id: string, { note, expectedUpdatedAt }: RejectInput) =>
+  review(user, id, { kind: 'reject', note }, expectedUpdatedAt);
 
 // Each question is reviewed on its own, so one that is missing or no longer pending doesn't block the rest.
-async function bulkReview(user: AuthUser, ids: string[], action: ReviewAction) {
+async function bulkReview(
+  user: AuthUser,
+  ids: string[],
+  action: ReviewAction,
+  expectedUpdatedAt: Record<string, string> = {},
+) {
   const succeeded: string[] = [];
-  const failed: { id: string; code: string; message: string }[] = [];
+  const failed: { id: string; code: string; message: string; details?: unknown }[] = [];
   for (const id of ids) {
     try {
-      await applyReview(user, id, action);
+      await applyReview(user, id, action, expectedUpdatedAt[id]);
       succeeded.push(id);
     } catch (err) {
       if (!(err instanceof AppError)) throw err;
-      failed.push({ id, code: err.code, message: err.message });
+      failed.push({ id, code: err.code, message: err.message, details: err.details });
     }
   }
   return { succeeded, failed };
 }
 
-export const bulkApproveQuestions = (user: AuthUser, { ids }: BulkReviewInput) =>
-  bulkReview(user, ids, { kind: 'approve' });
-export const bulkRejectQuestions = (user: AuthUser, { ids, note }: BulkRejectInput) =>
-  bulkReview(user, ids, { kind: 'reject', note });
+export const bulkApproveQuestions = (user: AuthUser, { ids, expectedUpdatedAt }: BulkReviewInput) =>
+  bulkReview(user, ids, { kind: 'approve' }, expectedUpdatedAt);
+export const bulkRejectQuestions = (user: AuthUser, { ids, note, expectedUpdatedAt }: BulkRejectInput) =>
+  bulkReview(user, ids, { kind: 'reject', note }, expectedUpdatedAt);
 
 type ReviewAction =
   | { kind: 'approve' }
   | { kind: 'requestChanges'; note: string }
   | { kind: 'reject'; note: string | undefined };
 
-async function review(user: AuthUser, id: string, action: ReviewAction) {
-  await applyReview(user, id, action);
+async function review(user: AuthUser, id: string, action: ReviewAction, expectedUpdatedAt?: string) {
+  await applyReview(user, id, action, expectedUpdatedAt);
   return getQuestion(user, id);
 }
 
-// Any reviewer may act, but only on a question that is waiting for review.
-async function applyReview(user: AuthUser, id: string, action: ReviewAction) {
+// Explains a failed review: someone else already decided it, or it changed after the reviewer loaded it.
+async function reviewConflict(id: string): Promise<AppError> {
+  const q = await prisma.question.findUnique({
+    where: { id },
+    select: { status: true, updatedAt: true, reviewedAt: true, reviewedBy: { select: { id: true, name: true } } },
+  });
+  if (!q) return new AppError(404, 'NOT_FOUND', 'Question not found');
+  if (q.status !== 'PENDING_REVIEW') {
+    return new AppError(409, 'CONFLICT', 'This question has already been reviewed', {
+      reason: 'ALREADY_REVIEWED',
+      status: q.status,
+      reviewedBy: q.reviewedBy,
+      reviewedAt: q.reviewedAt,
+    });
+  }
+  return new AppError(409, 'CONFLICT', 'This question was edited after you opened it. Reload and review again', {
+    reason: 'EDITED_SINCE_LOADED',
+    status: q.status,
+    updatedAt: q.updatedAt,
+  });
+}
+
+// Any reviewer may act, but only on a question that is waiting for review and unchanged since the
+// reviewer loaded it (expectedUpdatedAt). Without a token, the version read here is used, so a draft
+// can't be applied if the author edits mid-review.
+async function applyReview(user: AuthUser, id: string, action: ReviewAction, expectedUpdatedAt?: string) {
   const existing = await prisma.question.findUnique({ where: { id }, include: { draft: true } });
   if (!existing) throw new AppError(404, 'NOT_FOUND', 'Question not found');
-  if (existing.status !== 'PENDING_REVIEW') {
-    throw new AppError(409, 'CONFLICT', 'Only a question that is pending review can be reviewed');
+  if (existing.status !== 'PENDING_REVIEW') throw await reviewConflict(id);
+  if (expectedUpdatedAt && new Date(expectedUpdatedAt).getTime() !== existing.updatedAt.getTime()) {
+    throw await reviewConflict(id);
   }
 
   const now = new Date();
@@ -499,9 +531,10 @@ async function applyReview(user: AuthUser, id: string, action: ReviewAction) {
   }
 
   await prisma.$transaction(async (tx) => {
-    // Re-checks the status in the write itself, so two reviewers can't both act on one submission.
+    // Re-checks status and version in the write itself, so two reviewers can't both act on one
+    // submission and an edit made since the read above can't slip through.
     const claimed = await tx.question.updateMany({
-      where: { id, status: 'PENDING_REVIEW' },
+      where: { id, status: 'PENDING_REVIEW', updatedAt: existing.updatedAt },
       data: {
         status,
         reviewNote: note,
@@ -510,9 +543,7 @@ async function applyReview(user: AuthUser, id: string, action: ReviewAction) {
         ...(action.kind === 'approve' && !published && { publishedAt: now }),
       },
     });
-    if (claimed.count === 0) {
-      throw new AppError(409, 'CONFLICT', 'Only a question that is pending review can be reviewed');
-    }
+    if (claimed.count === 0) throw await reviewConflict(id);
 
     if (draft && action.kind === 'approve') await replaceContent(tx, id, draft);
     // Approved: applied above. Rejected: turned down. Either way the draft is done.
