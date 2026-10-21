@@ -74,7 +74,7 @@ export const getQuestion: RequestHandler = async (req, res, next) => {
 export const approveQuestion: RequestHandler = async (req, res, next) => {
   try {
     const { id } = questionIdParamSchema.parse(req.params);
-    res.json(await questionService.approveQuestion(req.user!, id));
+    res.json(await questionService.approveQuestion(req.user!, id, req.body));
   } catch (err) {
     next(err);
   }
@@ -91,6 +91,34 @@ export const bulkApproveQuestions: RequestHandler = async (req, res, next) => {
 export const bulkRejectQuestions: RequestHandler = async (req, res, next) => {
   try {
     res.json(await questionService.bulkRejectQuestions(req.user!, req.body));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getReviewState: RequestHandler = async (req, res, next) => {
+  try {
+    const { id } = questionIdParamSchema.parse(req.params);
+    res.json(await questionService.getReviewState(req.user!, id));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const acquireReviewLock: RequestHandler = async (req, res, next) => {
+  try {
+    const { id } = questionIdParamSchema.parse(req.params);
+    res.json(await questionService.acquireReviewLock(req.user!, id));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const releaseReviewLock: RequestHandler = async (req, res, next) => {
+  try {
+    const { id } = questionIdParamSchema.parse(req.params);
+    await questionService.releaseReviewLock(req.user!, id);
+    res.status(204).end();
   } catch (err) {
     next(err);
   }

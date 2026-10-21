@@ -757,6 +757,49 @@ export const openApiSpec = {
         },
       },
     },
+    '/questions/{id}/review-state': {
+      get: {
+        tags: ['Questions'],
+        summary: 'Current review state of a question (requires question:review)',
+        description: 'Light poll for an open review screen: status, the updatedAt to send back as expectedUpdatedAt, and who holds the review lock (null when nobody, or the claim has lapsed).',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': { description: 'Review state', content: { 'application/json': { schema: { $ref: '#/components/schemas/ReviewState' } } } },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
+    '/questions/{id}/review-lock': {
+      post: {
+        tags: ['Questions'],
+        summary: 'Claim a question for review, or renew your claim (requires question:review)',
+        description: 'Soft lock for 5 minutes. Call when the review screen opens and about every minute after as a heartbeat. Other reviewers cannot approve, reject or request changes while the claim is live. A lapsed claim can be taken over. The lock is cleared when the question is reviewed.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': { description: 'You hold the lock', content: { 'application/json': { schema: { $ref: '#/components/schemas/ReviewState' } } } },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+          '409': { description: 'Locked by another reviewer (code LOCKED), or no longer pending review (details.reason ALREADY_REVIEWED)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+      delete: {
+        tags: ['Questions'],
+        summary: 'Release your claim on a question (requires question:review)',
+        description: 'Call when the reviewer closes the review screen. Releasing a claim you do not hold does nothing.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '204': { description: 'Released' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+        },
+      },
+    },
     '/questions/{id}/approve': {
       post: {
         tags: ['Questions'],
@@ -764,12 +807,14 @@ export const openApiSpec = {
         description: 'Makes a new question live, or applies a pending draft to an approved one. Any reviewer may approve.',
         security: [{ bearerAuth: [] }],
         parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: { required: false, content: { 'application/json': { schema: { type: 'object', additionalProperties: false, properties: { expectedUpdatedAt: { type: 'string', format: 'date-time', description: 'The updatedAt you loaded. If the question changed since, the review fails with 409 EDITED_SINCE_LOADED' } } } } } },
         responses: {
+          '400': { $ref: '#/components/responses/ValidationError' },
           '200': { description: 'Approved question', content: { 'application/json': { schema: { $ref: '#/components/schemas/Question' } } } },
           '401': { $ref: '#/components/responses/Unauthorized' },
           '403': { $ref: '#/components/responses/Forbidden' },
           '404': { $ref: '#/components/responses/NotFound' },
-          '409': { description: 'Question is not pending review', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'Already reviewed, edited since you loaded it, or locked by another reviewer (see error.code and error.details.reason)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },
@@ -787,7 +832,7 @@ export const openApiSpec = {
           '401': { $ref: '#/components/responses/Unauthorized' },
           '403': { $ref: '#/components/responses/Forbidden' },
           '404': { $ref: '#/components/responses/NotFound' },
-          '409': { description: 'Question is not pending review', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'Already reviewed, edited since you loaded it, or locked by another reviewer (see error.code and error.details.reason)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },
@@ -805,7 +850,7 @@ export const openApiSpec = {
           '401': { $ref: '#/components/responses/Unauthorized' },
           '403': { $ref: '#/components/responses/Forbidden' },
           '404': { $ref: '#/components/responses/NotFound' },
-          '409': { description: 'Question is not pending review', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'Already reviewed, edited since you loaded it, or locked by another reviewer (see error.code and error.details.reason)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },
@@ -974,6 +1019,15 @@ export const openApiSpec = {
           isLive: { type: 'boolean', description: 'Author and reviewers only: has been approved before. With hasDraft this is an edit of a live question (EDIT); without it, a new submission (NEW).' },
           submittedAt: { type: 'string', format: 'date-time', description: 'Author and reviewers only: when it was created or last (re)submitted for review' },
           hasDraft: { type: 'boolean', description: 'Author and reviewers only: an edit is waiting for review' },
+          reviewLock: {
+            type: 'object',
+            nullable: true,
+            description: 'Reviewers only: who is reviewing it right now. null when nobody is, or the claim has lapsed',
+            properties: {
+              lockedBy: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } },
+              expiresAt: { type: 'string', format: 'date-time' },
+            },
+          },
           draft: {
             type: 'object',
             description: 'Single-question and submissions views, author and reviewers only: the pending edit of an approved question',
@@ -996,12 +1050,15 @@ export const openApiSpec = {
         type: 'object',
         required: ['note'],
         additionalProperties: false,
-        properties: { note: { type: 'string', minLength: 1, maxLength: 1000 } },
+        properties: { note: { type: 'string', minLength: 1, maxLength: 1000 }, expectedUpdatedAt: { type: 'string', format: 'date-time', description: 'The updatedAt you loaded. If the question changed since, the review fails with 409 EDITED_SINCE_LOADED' } },
       },
       RejectRequest: {
         type: 'object',
         additionalProperties: false,
-        properties: { note: { type: 'string', maxLength: 1000, description: 'Optional reason shown to the author' } },
+        properties: {
+          note: { type: 'string', maxLength: 1000, description: 'Optional reason shown to the author' },
+          expectedUpdatedAt: { type: 'string', format: 'date-time', description: 'The updatedAt you loaded. If the question changed since, the review fails with 409 EDITED_SINCE_LOADED' },
+        },
       },
       BulkReviewRequest: {
         type: 'object',
@@ -1009,6 +1066,7 @@ export const openApiSpec = {
         additionalProperties: false,
         properties: {
           ids: { type: 'array', minItems: 1, maxItems: 50, uniqueItems: true, items: { type: 'string', format: 'uuid' } },
+          expectedUpdatedAt: { type: 'object', additionalProperties: { type: 'string', format: 'date-time' }, description: 'Map of question id to the updatedAt you loaded. A question that changed since is reported in `failed` with details.reason EDITED_SINCE_LOADED' },
         },
       },
       BulkRejectRequest: {
@@ -1017,6 +1075,7 @@ export const openApiSpec = {
         additionalProperties: false,
         properties: {
           ids: { type: 'array', minItems: 1, maxItems: 50, uniqueItems: true, items: { type: 'string', format: 'uuid' } },
+          expectedUpdatedAt: { type: 'object', additionalProperties: { type: 'string', format: 'date-time' }, description: 'Map of question id to the updatedAt you loaded. A question that changed since is reported in `failed` with details.reason EDITED_SINCE_LOADED' },
           note: { type: 'string', maxLength: 1000, description: 'Optional reason shown to the authors' },
         },
       },
@@ -1032,9 +1091,38 @@ export const openApiSpec = {
                 id: { type: 'string', format: 'uuid' },
                 code: { type: 'string', example: 'CONFLICT' },
                 message: { type: 'string' },
+                details: { $ref: '#/components/schemas/ReviewConflictDetails' },
               },
             },
           },
+        },
+      },
+      ReviewState: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', enum: ['PENDING_REVIEW', 'APPROVED', 'CHANGES_REQUESTED', 'REJECTED'] },
+          updatedAt: { type: 'string', format: 'date-time' },
+          reviewLock: {
+            type: 'object',
+            nullable: true,
+            properties: {
+              lockedBy: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } },
+              expiresAt: { type: 'string', format: 'date-time' },
+            },
+          },
+        },
+      },
+      ReviewConflictDetails: {
+        type: 'object',
+        description: 'Why a review was refused with 409',
+        properties: {
+          reason: { type: 'string', enum: ['ALREADY_REVIEWED', 'EDITED_SINCE_LOADED', 'LOCKED'] },
+          lockedBy: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } }, description: 'LOCKED' },
+          expiresAt: { type: 'string', format: 'date-time', description: 'LOCKED: when the claim lapses' },
+          status: { type: 'string', enum: ['PENDING_REVIEW', 'APPROVED', 'CHANGES_REQUESTED', 'REJECTED'] },
+          reviewedBy: { type: 'object', nullable: true, properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } },
+          reviewedAt: { type: 'string', format: 'date-time', nullable: true },
+          updatedAt: { type: 'string', format: 'date-time', description: 'Current version (EDITED_SINCE_LOADED)' },
         },
       },
       CreateStaffRequest: {

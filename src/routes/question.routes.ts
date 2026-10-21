@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  acquireReviewLock,
   approveQuestion,
   bulkApproveQuestions,
   bulkRejectQuestions,
@@ -10,10 +11,12 @@ import {
   exportQuestions,
   getQuestion,
   getQuestionHistory,
+  getReviewState,
   importQuestions,
   listQuestions,
   listSubmissions,
   rejectQuestion,
+  releaseReviewLock,
   requestChanges,
   updateQuestion,
 } from '../controllers/question.controller.js';
@@ -23,6 +26,7 @@ import { uploadCsv } from '../middlewares/uploadCsv.js';
 import { validate } from '../middlewares/validate.js';
 import {
   bulkRejectSchema,
+  approveSchema,
   bulkReviewSchema,
   checkDuplicateSchema,
   createQuestionSchema,
@@ -41,6 +45,7 @@ router.get('/counts', requirePermission('question:read'), countQuestions);
 router.get('/export', requirePermission('question:read'), exportQuestions);
 router.get('/:id', requirePermission('question:read'), getQuestion);
 router.get('/:id/history', requirePermission('question:read'), getQuestionHistory);
+router.get('/:id/review-state', requirePermission('question:review'), getReviewState);
 router.post('/', requirePermission('question:create'), validate(createQuestionSchema), createQuestion);
 router.get('/import/template', requirePermission('question:create'), downloadImportTemplate);
 router.post('/import', requirePermission('question:create'), uploadCsv, importQuestions);
@@ -56,7 +61,10 @@ router.patch(
 // Registered before the '/:id/...' routes so "bulk" is never read as an id.
 router.post('/bulk/approve', requirePermission('question:review'), validate(bulkReviewSchema), bulkApproveQuestions);
 router.post('/bulk/reject', requirePermission('question:review'), validate(bulkRejectSchema), bulkRejectQuestions);
-router.post('/:id/approve', requirePermission('question:review'), approveQuestion);
+// POST claims the question and renews the claim, so the review screen calls it as a heartbeat.
+router.post('/:id/review-lock', requirePermission('question:review'), acquireReviewLock);
+router.delete('/:id/review-lock', requirePermission('question:review'), releaseReviewLock);
+router.post('/:id/approve', requirePermission('question:review'), validate(approveSchema), approveQuestion);
 router.post('/:id/request-changes', requirePermission('question:review'), validate(requestChangesSchema), requestChanges);
 router.post('/:id/reject', requirePermission('question:review'), validate(rejectSchema), rejectQuestion);
 
