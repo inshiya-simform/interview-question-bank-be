@@ -727,6 +727,36 @@ export const openApiSpec = {
         },
       },
     },
+    '/questions/bulk/approve': {
+      post: {
+        tags: ['Questions'],
+        summary: 'Approve several questions pending review (requires question:review)',
+        description: 'Same rules as approving a single question. Each question is reviewed independently: ones that are missing or not pending review are reported in `failed` and do not stop the rest. Nothing is rolled back.',
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/BulkReviewRequest' } } } },
+        responses: {
+          '200': { description: 'Outcome per question', content: { 'application/json': { schema: { $ref: '#/components/schemas/BulkReviewResult' } } } },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+        },
+      },
+    },
+    '/questions/bulk/reject': {
+      post: {
+        tags: ['Questions'],
+        summary: 'Reject several questions pending review (requires question:review)',
+        description: 'Same rules as rejecting a single question; the optional note applies to every question. Each question is reviewed independently: ones that are missing or not pending review are reported in `failed` and do not stop the rest. Nothing is rolled back.',
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/BulkRejectRequest' } } } },
+        responses: {
+          '200': { description: 'Outcome per question', content: { 'application/json': { schema: { $ref: '#/components/schemas/BulkReviewResult' } } } },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+        },
+      },
+    },
     '/questions/{id}/approve': {
       post: {
         tags: ['Questions'],
@@ -972,6 +1002,40 @@ export const openApiSpec = {
         type: 'object',
         additionalProperties: false,
         properties: { note: { type: 'string', maxLength: 1000, description: 'Optional reason shown to the author' } },
+      },
+      BulkReviewRequest: {
+        type: 'object',
+        required: ['ids'],
+        additionalProperties: false,
+        properties: {
+          ids: { type: 'array', minItems: 1, maxItems: 50, uniqueItems: true, items: { type: 'string', format: 'uuid' } },
+        },
+      },
+      BulkRejectRequest: {
+        type: 'object',
+        required: ['ids'],
+        additionalProperties: false,
+        properties: {
+          ids: { type: 'array', minItems: 1, maxItems: 50, uniqueItems: true, items: { type: 'string', format: 'uuid' } },
+          note: { type: 'string', maxLength: 1000, description: 'Optional reason shown to the authors' },
+        },
+      },
+      BulkReviewResult: {
+        type: 'object',
+        properties: {
+          succeeded: { type: 'array', items: { type: 'string', format: 'uuid' } },
+          failed: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                code: { type: 'string', example: 'CONFLICT' },
+                message: { type: 'string' },
+              },
+            },
+          },
+        },
       },
       CreateStaffRequest: {
         type: 'object',
