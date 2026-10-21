@@ -48,10 +48,26 @@ export const rejectSchema = z
   .default({})
   .transform(({ note }) => ({ note: note || undefined }));
 
+export const bulkReviewSchema = z
+  .object({
+    ids: z
+      .array(z.uuid())
+      .min(1)
+      .max(50)
+      .refine((ids) => new Set(ids).size === ids.length, 'Each id may appear only once'),
+  })
+  .strict();
+
+export const bulkRejectSchema = bulkReviewSchema
+  .extend({ note: reviewNote.optional() })
+  .transform(({ ids, note }) => ({ ids, note: note || undefined }));
+
 export const questionIdParamSchema = z.object({ id: z.uuid() });
 
 export type UpdateQuestionInput = z.infer<typeof updateQuestionSchema>;
 export type RequestChangesInput = z.infer<typeof requestChangesSchema>;
+export type BulkReviewInput = z.infer<typeof bulkReviewSchema>;
+export type BulkRejectInput = z.output<typeof bulkRejectSchema>;
 export type RejectInput = z.output<typeof rejectSchema>;
 export type CheckDuplicateInput = z.infer<typeof checkDuplicateSchema>;
 export type CreateQuestionInput = z.infer<typeof createQuestionSchema>;

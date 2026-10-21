@@ -80,6 +80,22 @@ export const approveQuestion: RequestHandler = async (req, res, next) => {
   }
 };
 
+export const bulkApproveQuestions: RequestHandler = async (req, res, next) => {
+  try {
+    res.json(await questionService.bulkApproveQuestions(req.user!, req.body));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const bulkRejectQuestions: RequestHandler = async (req, res, next) => {
+  try {
+    res.json(await questionService.bulkRejectQuestions(req.user!, req.body));
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const requestChanges: RequestHandler = async (req, res, next) => {
   try {
     const { id } = questionIdParamSchema.parse(req.params);
