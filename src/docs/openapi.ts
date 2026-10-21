@@ -1019,6 +1019,15 @@ export const openApiSpec = {
           isLive: { type: 'boolean', description: 'Author and reviewers only: has been approved before. With hasDraft this is an edit of a live question (EDIT); without it, a new submission (NEW).' },
           submittedAt: { type: 'string', format: 'date-time', description: 'Author and reviewers only: when it was created or last (re)submitted for review' },
           hasDraft: { type: 'boolean', description: 'Author and reviewers only: an edit is waiting for review' },
+          reviewLock: {
+            type: 'object',
+            nullable: true,
+            description: 'Reviewers only: who is reviewing it right now. null when nobody is, or the claim has lapsed',
+            properties: {
+              lockedBy: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } },
+              expiresAt: { type: 'string', format: 'date-time' },
+            },
+          },
           draft: {
             type: 'object',
             description: 'Single-question and submissions views, author and reviewers only: the pending edit of an approved question',
