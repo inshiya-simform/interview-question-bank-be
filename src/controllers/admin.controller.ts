@@ -3,7 +3,7 @@ import * as adminService from '../services/admin.service.js';
 import {
   clientIdParamSchema,
   clientUserParamSchema,
-  listClientAccessQuerySchema,
+  listClientsQuerySchema,
   listUsersQuerySchema,
 } from '../validators/admin.validators.js';
 
@@ -31,9 +31,9 @@ export const createClient: RequestHandler = async (req, res, next) => {
   }
 };
 
-export const listClientAccess: RequestHandler = async (req, res, next) => {
+export const listClients: RequestHandler = async (req, res, next) => {
   try {
-    res.json(await adminService.listClientAccess(listClientAccessQuerySchema.parse(req.query)));
+    res.json(await adminService.listClients(listClientsQuerySchema.parse(req.query)));
   } catch (err) {
     next(err);
   }

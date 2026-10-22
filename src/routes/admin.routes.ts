@@ -3,7 +3,7 @@ import {
   createClient,
   createStaff,
   grantClientAccess,
-  listClientAccess,
+  listClients,
   listUsers,
   revokeClientAccess,
 } from '../controllers/admin.controller.js';
@@ -21,7 +21,7 @@ router.get('/users', requirePermission('user:read'), listUsers);
 router.post('/users', requirePermission('user:create_staff'), validate(createStaffSchema), createStaff);
 
 // Client access page
-router.get('/clients', requirePermission('client:read_all'), listClientAccess);
+router.get('/clients', requirePermission('client:read_all'), listClients);
 router.post('/clients', requirePermission('client:create'), validate(createClientSchema), createClient);
 router.post(
   '/clients/:clientId/users',

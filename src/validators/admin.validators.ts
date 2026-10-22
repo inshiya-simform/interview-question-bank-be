@@ -18,6 +18,8 @@ export const listUsersQuerySchema = z
     // matches user name or email
     search: z.string().trim().min(1).max(200).optional(),
     role: z.enum(['REVIEWER', 'USER']).optional(),
+    // only users with a grant on this client
+    clientId: z.uuid().optional(),
     // query strings are text, so z.coerce.boolean() would treat "false" as true
     excludeAdmin: z
       .enum(['true', 'false'])
@@ -26,11 +28,11 @@ export const listUsersQuerySchema = z
   })
   .strict();
 
-export const listClientAccessQuerySchema = z
+export const listClientsQuerySchema = z
   .object({
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(100).default(20),
-    // matches client name or the email of a user with access
+    // matches client name
     search: z.string().trim().min(1).max(200).optional(),
   })
   .strict();
@@ -47,5 +49,5 @@ export const clientUserParamSchema = z.object({ clientId: z.uuid(), userId: z.uu
 export type CreateStaffInput = z.infer<typeof createStaffSchema>;
 export type CreateClientInput = z.infer<typeof createClientSchema>;
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
-export type ListClientAccessQuery = z.infer<typeof listClientAccessQuerySchema>;
+export type ListClientsQuery = z.infer<typeof listClientsQuerySchema>;
 export type GrantClientAccessInput = z.infer<typeof grantClientAccessSchema>;
