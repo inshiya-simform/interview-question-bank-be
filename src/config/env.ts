@@ -14,4 +14,6 @@ export const env = {
   jwtSecret: required('JWT_SECRET'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '1d',
   duplicateSimilarityThreshold: Number(process.env.DUPLICATE_SIMILARITY_THRESHOLD ?? 0.8),
+  sendgridApiKey: process.env.SENDGRID_API_KEY,
+  emailFrom: process.env.EMAIL_FROM,
 } as const;

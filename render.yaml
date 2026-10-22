@@ -27,3 +27,7 @@ services:
         value: 1d
       - key: CORS_ORIGIN
         sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
