@@ -29,3 +29,27 @@ export const myPermissions: RequestHandler = (req, res) => {
   const { role, permissions, clientIds } = req.user!;
   res.json({ role, permissions, clientIds });
 };
+
+export const forgotPassword: RequestHandler = async (req, res, next) => {
+  try {
+    res.json(await authService.forgotPassword(req.body));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const verifyResetToken: RequestHandler = async (req, res, next) => {
+  try {
+    res.json(await authService.verifyResetToken(req.body));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const resetPassword: RequestHandler = async (req, res, next) => {
+  try {
+    res.json(await authService.resetPassword(req.body));
+  } catch (err) {
+    next(err);
+  }
+};

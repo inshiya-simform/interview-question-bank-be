@@ -7,6 +7,7 @@ import { errorHandler, notFound } from './middlewares/errorHandler.js';
 import routes from './routes/index.js';
 
 const app = express();
+app.set('trust proxy', 1); // behind Render's proxy; needed for per-client rate limiting
 
 app.use(cors({ origin: env.corsOrigin }));
 app.use(express.json());

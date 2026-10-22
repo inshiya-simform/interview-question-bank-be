@@ -16,4 +16,6 @@ export const env = {
   duplicateSimilarityThreshold: Number(process.env.DUPLICATE_SIMILARITY_THRESHOLD ?? 0.8),
   sendgridApiKey: process.env.SENDGRID_API_KEY,
   emailFrom: process.env.EMAIL_FROM,
+  frontendUrl: process.env.FRONTEND_URL ?? 'http://localhost:5173',
+  passwordResetExpiryMinutes: Number(process.env.PASSWORD_RESET_EXPIRY_MINUTES ?? 30),
 } as const;
