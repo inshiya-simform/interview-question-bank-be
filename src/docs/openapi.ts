@@ -77,6 +77,67 @@ export const openApiSpec = {
         },
       },
     },
+    '/auth/forgot-password': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Email a password reset link (always 200, whether or not the email exists)',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/ForgotPasswordRequest' } },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Generic confirmation',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Message' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+        },
+      },
+    },
+    '/auth/reset-password/verify': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Check a reset token is still usable, before showing the reset form',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/VerifyResetTokenRequest' } },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Token is valid',
+            content: {
+              'application/json': {
+                schema: { type: 'object', properties: { valid: { type: 'boolean' } } },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+        },
+      },
+    },
+    '/auth/reset-password': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Set a new password using the token from the reset email',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/ResetPasswordRequest' } },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Password updated',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Message' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+        },
+      },
+    },
     '/auth/me': {
       get: {
         tags: ['Auth'],
@@ -922,6 +983,32 @@ export const openApiSpec = {
           email: { type: 'string', format: 'email' },
           password: { type: 'string' },
         },
+      },
+      ForgotPasswordRequest: {
+        type: 'object',
+        required: ['email'],
+        additionalProperties: false,
+        properties: { email: { type: 'string', format: 'email' } },
+      },
+      VerifyResetTokenRequest: {
+        type: 'object',
+        required: ['token'],
+        additionalProperties: false,
+        properties: { token: { type: 'string', description: 'Token from the emailed link' } },
+      },
+      ResetPasswordRequest: {
+        type: 'object',
+        required: ['token', 'password', 'confirmPassword'],
+        additionalProperties: false,
+        properties: {
+          token: { type: 'string', description: 'Token from the emailed link' },
+          password: { type: 'string', minLength: 8, maxLength: 72 },
+          confirmPassword: { type: 'string', description: 'Must equal password' },
+        },
+      },
+      Message: {
+        type: 'object',
+        properties: { message: { type: 'string' } },
       },
       AuthUser: {
         type: 'object',

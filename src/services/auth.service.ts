@@ -1,10 +1,20 @@
+import { createHash, randomBytes } from 'node:crypto';
+import { env } from '../config/env.js';
 import { prisma } from '../db/prisma.js';
 import { Prisma } from '../generated/prisma/client.js';
+import { passwordResetEmail } from './email/templates/index.js';
+import { sendEmailSafe } from './email/email.service.js';
 import type { AuthUser } from '../types/express.js';
 import { AppError } from '../utils/AppError.js';
 import { signToken } from '../utils/jwt.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
-import type { LoginInput, RegisterInput } from '../validators/auth.validators.js';
+import type {
+  ForgotPasswordInput,
+  LoginInput,
+  RegisterInput,
+  ResetPasswordInput,
+  VerifyResetTokenInput,
+} from '../validators/auth.validators.js';
 
 const DEFAULT_ROLE = 'USER';
 
@@ -84,4 +94,66 @@ export async function getMe(userId: string) {
     permissions: auth.permissions,
     clients: user.permissions.map((cp) => ({ id: cp.client.id, name: cp.client.name })),
   };
+}
+
+const hashResetToken = (token: string) => createHash('sha256').update(token).digest('hex');
+
+// Always resolves the same way so the response never reveals whether an email is registered.
+export async function forgotPassword(input: ForgotPasswordInput) {
+  const user = await prisma.user.findUnique({ where: { email: input.email } });
+  if (user) {
+    const token = randomBytes(32).toString('hex');
+    const expiresInMinutes = env.passwordResetExpiryMinutes;
+
+    await prisma.$transaction([
+      prisma.passwordResetToken.deleteMany({ where: { userId: user.id, usedAt: null } }),
+      prisma.passwordResetToken.create({
+        data: {
+          userId: user.id,
+          tokenHash: hashResetToken(token),
+          expiresAt: new Date(Date.now() + expiresInMinutes * 60_000),
+        },
+      }),
+    ]);
+
+    const resetUrl = `${env.frontendUrl.replace(/\/$/, '')}/reset-password?token=${token}`;
+    sendEmailSafe({
+      to: user.email,
+      ...passwordResetEmail({ name: user.name, resetUrl, expiresInMinutes }),
+    });
+  }
+  return { message: 'If an account exists for that email, a password reset link has been sent.' };
+}
+
+const invalidResetLink = () => new AppError(400, 'VALIDATION_ERROR', 'Invalid or expired reset link');
+
+async function findUsableResetToken(token: string) {
+  const record = await prisma.passwordResetToken.findUnique({
+    where: { tokenHash: hashResetToken(token) },
+  });
+  if (!record || record.usedAt || record.expiresAt <= new Date()) throw invalidResetLink();
+  return record;
+}
+
+// Lets the frontend refuse to show the reset form for a used, expired or unknown link.
+export async function verifyResetToken(input: VerifyResetTokenInput) {
+  await findUsableResetToken(input.token);
+  return { valid: true };
+}
+
+export async function resetPassword(input: ResetPasswordInput) {
+  const record = await findUsableResetToken(input.token);
+
+  const passwordHash = await hashPassword(input.password);
+  await prisma.$transaction(async (tx) => {
+    // Conditional update makes consumption atomic if the same link is submitted twice at once.
+    const consumed = await tx.passwordResetToken.updateMany({
+      where: { id: record.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    if (consumed.count === 0) throw invalidResetLink();
+    await tx.user.update({ where: { id: record.userId }, data: { passwordHash } });
+  });
+
+  return { message: 'Password has been reset. You can now log in.' };
 }

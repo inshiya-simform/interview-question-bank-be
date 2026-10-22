@@ -61,11 +61,12 @@ model User {
 
   role Role @relation(fields: [roleId], references: [id])
 
-  questions   Question[]         @relation("QuestionAuthor")
-  permissions       ClientPermission[]
-  history           QuestionHistory[]
-  reviewedQuestions Question[]         @relation("QuestionReviewer")
-  reviewLocks       QuestionReviewLock[]
+  questions           Question[]           @relation("QuestionAuthor")
+  permissions         ClientPermission[]
+  history             QuestionHistory[]
+  reviewedQuestions   Question[]           @relation("QuestionReviewer")
+  reviewLocks         QuestionReviewLock[]
+  passwordResetTokens PasswordResetToken[]
 }
 
 model Client {
@@ -138,7 +139,7 @@ model Question {
   tags    QuestionTag[]
   history QuestionHistory[]
 
-  reviewedBy User?          @relation("QuestionReviewer", fields: [reviewedById], references: [id])
+  reviewedBy User?               @relation("QuestionReviewer", fields: [reviewedById], references: [id])
   draft      QuestionDraft?
   reviewLock QuestionReviewLock?
 
@@ -204,4 +205,19 @@ model QuestionHistory {
   actor    User     @relation(fields: [actorId], references: [id])
 
   @@index([questionId, createdAt])
+}
+
+// One-time password reset link. Only the sha256 of the emailed token is stored, so a database leak
+// does not yield usable links. Consumed (usedAt) or expired rows are ignored.
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
