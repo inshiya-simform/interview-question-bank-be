@@ -6,7 +6,7 @@ import type {
   CreateClientInput,
   CreateStaffInput,
   GrantClientAccessInput,
-  ListClientAccessQuery,
+  ListClientsQuery,
   ListUsersQuery,
 } from '../validators/admin.validators.js';
 
@@ -33,7 +33,7 @@ const toUserDto = (u: UserRow) => ({
   clients: u.permissions.map((p) => p.client).sort((a, b) => a.name.localeCompare(b.name)),
 });
 
-export async function listUsers({ page, limit, search, role, excludeAdmin }: ListUsersQuery) {
+export async function listUsers({ page, limit, search, role, excludeAdmin, clientId }: ListUsersQuery) {
   const where: Prisma.UserWhereInput = {
     ...(search && {
       OR: [
@@ -43,6 +43,7 @@ export async function listUsers({ page, limit, search, role, excludeAdmin }: Lis
     }),
     ...(role && { role: { name: role } }),
     ...(excludeAdmin && { role: { name: role ?? { not: 'SUPER_ADMIN' } } }),
+    ...(clientId && { permissions: { some: { clientId } } }),
   };
   const [total, users] = await prisma.$transaction([
     prisma.user.count({ where }),
@@ -73,26 +74,19 @@ const toClientAccessDto = (c: ClientAccessRow) => {
   return { id: c.id, name: c.name, userCount: users.length, users };
 };
 
-export async function listClientAccess({ page, limit, search }: ListClientAccessQuery) {
-  const where: Prisma.ClientWhereInput = search
-    ? {
-        OR: [
-          { name: { contains: search, mode: 'insensitive' } },
-          { permissions: { some: { user: { email: { contains: search, mode: 'insensitive' } } } } },
-        ],
-      }
-    : {};
-  const [total, rows] = await prisma.$transaction([
+export async function listClients({ page, limit, search }: ListClientsQuery) {
+  const where: Prisma.ClientWhereInput = search ? { name: { contains: search, mode: 'insensitive' } } : {};
+  const [total, clients] = await prisma.$transaction([
     prisma.client.count({ where }),
     prisma.client.findMany({
       where,
-      select: clientAccessSelect,
+      select: { id: true, name: true },
       orderBy: { name: 'asc' },
       skip: (page - 1) * limit,
       take: limit,
     }),
   ]);
-  return { clients: rows.map(toClientAccessDto), page, limit, total };
+  return { clients, page, limit, total };
 }
 
 export async function createClient({ name }: CreateClientInput) {

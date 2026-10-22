@@ -160,6 +160,12 @@ export const openApiSpec = {
           { name: 'search', in: 'query', schema: { type: 'string' } },
           { name: 'role', in: 'query', schema: { type: 'string', enum: ['REVIEWER', 'USER'] } },
           {
+            name: 'clientId',
+            in: 'query',
+            description: 'Only users with access to this client.',
+            schema: { type: 'string', format: 'uuid' },
+          },
+          {
             name: 'excludeAdmin',
             in: 'query',
             description: 'When true, SUPER_ADMIN users are omitted.',
@@ -216,8 +222,8 @@ export const openApiSpec = {
     '/admin/clients': {
       get: {
         tags: ['Admin'],
-        summary: 'Clients with the users who have access, paginated (SUPER_ADMIN)',
-        description: 'Drives the Client access page. `search` matches client name or the email of a user with access.',
+        summary: 'List clients (id and name only), paginated (SUPER_ADMIN)',
+        description: '`search` matches client name. For the users of a client use GET /admin/users?clientId=.',
         security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
@@ -232,7 +238,13 @@ export const openApiSpec = {
                 schema: {
                   type: 'object',
                   properties: {
-                    clients: { type: 'array', items: { $ref: '#/components/schemas/ClientAccess' } },
+                    clients: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } },
+                      },
+                    },
                     page: { type: 'integer' },
                     limit: { type: 'integer' },
                     total: { type: 'integer' },
