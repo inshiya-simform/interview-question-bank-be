@@ -6,6 +6,12 @@ import type { Prisma, QuestionStatus } from '../generated/prisma/client.js';
 import type { AuthUser } from '../types/express.js';
 import { AppError } from '../utils/AppError.js';
 import { normalizeText } from '../utils/normalize.js';
+import { sendEmailSafe } from './email/email.service.js';
+import {
+  questionApprovedEmail,
+  questionChangesRequestedEmail,
+  questionRejectedEmail,
+} from './email/templates/index.js';
 import type {
   CheckDuplicateInput,
   CreateQuestionInput,
@@ -538,7 +544,9 @@ async function reviewConflict(id: string): Promise<AppError> {
 // reviewer loaded it (expectedUpdatedAt). Without a token, the version read here is used, so a draft
 // can't be applied if the author edits mid-review.
 async function applyReview(user: AuthUser, id: string, action: ReviewAction, expectedUpdatedAt?: string) {
-  const existing = await prisma.question.findUnique({ where: { id }, include: { draft: true } });
+  const existing = await prisma.question.findUnique({ where: { id },
+    include: { draft: true, author: { select: { id: true, name: true, email: true } } },
+  });
   if (!existing) throw new AppError(404, 'NOT_FOUND', 'Question not found');
   if (existing.status !== 'PENDING_REVIEW') throw await reviewConflict(id);
   if (expectedUpdatedAt && new Date(expectedUpdatedAt).getTime() !== existing.updatedAt.getTime()) {
@@ -611,6 +619,29 @@ async function applyReview(user: AuthUser, id: string, action: ReviewAction, exp
       data: { questionId: id, actorId: user.id, action: historyAction, changes },
     });
   });
+
+  notifyAuthor(user, existing, action, published);
+}
+
+// Tells the author about the decision. Sent after the transaction commits, and a failed email never
+// fails the review. Reviewing your own question doesn't notify you.
+function notifyAuthor(
+  reviewer: AuthUser,
+  question: { text: string; author: { id: string; name: string; email: string } },
+  action: ReviewAction,
+  published: boolean,
+) {
+  const { author } = question;
+  if (author.id === reviewer.id) return;
+
+  const base = { authorName: author.name, reviewerName: reviewer.name, questionText: question.text };
+  const content =
+    action.kind === 'approve'
+      ? questionApprovedEmail({ ...base, isEdit: published })
+      : action.kind === 'requestChanges'
+        ? questionChangesRequestedEmail({ ...base, note: action.note })
+        : questionRejectedEmail({ ...base, note: action.note ?? null, isEdit: published });
+  sendEmailSafe({ to: author.email, ...content });
 }
 
 // Writes content onto the question row and replaces its tag set.
