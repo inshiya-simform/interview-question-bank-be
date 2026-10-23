@@ -721,6 +721,52 @@ export const openApiSpec = {
         },
       },
     },
+    '/uploads/images': {
+      post: {
+        tags: ['Questions'],
+        summary: 'Upload an image for use in answer notes',
+        description: 'PNG, JPEG, WebP or GIF, max 2 MB. Put the returned url in an <img src> inside answerNotes.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            'multipart/form-data': {
+              schema: {
+                type: 'object',
+                required: ['file'],
+                properties: { file: { type: 'string', format: 'binary' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Uploaded',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { id: { type: 'string', format: 'uuid' }, url: { type: 'string' } },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+        },
+      },
+    },
+    '/uploads/images/{id}': {
+      get: {
+        tags: ['Questions'],
+        summary: 'Fetch an uploaded image (public; the URL is unguessable)',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': { description: 'Image bytes' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
     '/questions/import': {
       post: {
         tags: ['Questions'],
@@ -1117,7 +1163,7 @@ export const openApiSpec = {
         additionalProperties: false,
         properties: {
           text: { type: 'string', minLength: 1, maxLength: 2000 },
-          answerNotes: { type: 'string', maxLength: 10000 },
+          answerNotes: { type: 'string', maxLength: 50000, description: 'Rich-text HTML, sanitized on save. Text content max 10000 chars. Images must be uploaded via POST /uploads/images and referenced by the returned url.' },
           clientId: {
             type: 'string',
             format: 'uuid',
@@ -1153,7 +1199,7 @@ export const openApiSpec = {
         description: 'Same fields as CreateQuestionRequest, all optional, at least one required',
         properties: {
           text: { type: 'string', minLength: 1, maxLength: 2000 },
-          answerNotes: { type: 'string', maxLength: 10000 },
+          answerNotes: { type: 'string', maxLength: 50000, description: 'Rich-text HTML, sanitized on save. Text content max 10000 chars. Images must be uploaded via POST /uploads/images and referenced by the returned url.' },
           clientId: {
             type: 'string',
             format: 'uuid',

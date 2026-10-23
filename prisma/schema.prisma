@@ -94,6 +94,7 @@ model User {
   reviewLocks         QuestionReviewLock[]
   passwordResetTokens PasswordResetToken[]
   auditLogs           AuditLog[]
+  images              QuestionImage[]
 }
 
 model Client {
@@ -267,4 +268,19 @@ model AuditLog {
   @@index([createdAt(sort: Desc)])
   @@index([module, createdAt])
   @@index([actorId, createdAt])
+}
+
+// Image uploaded for use inside rich-text answer notes. The bytes live in object storage (MinIO/S3);
+// the note HTML references /api/v1/uploads/images/:id. Rows no note refers to are removed by the orphan sweep.
+model QuestionImage {
+  id          String   @id @default(uuid())
+  objectKey   String   @unique
+  mimeType    String
+  size        Int
+  createdById String
+  createdAt   DateTime @default(now())
+
+  createdBy User @relation(fields: [createdById], references: [id])
+
+  @@index([createdAt])
 }

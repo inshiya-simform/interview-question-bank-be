@@ -10,7 +10,7 @@ const app = express();
 app.set('trust proxy', 1); // behind Render's proxy; needed for per-client rate limiting
 
 app.use(cors({ origin: env.corsOrigin }));
-app.use(express.json());
+app.use(express.json({ limit: '256kb' }));
 
 app.get('/api/docs.json', (_req, res) => res.json(openApiSpec));
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openApiSpec as object));

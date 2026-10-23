@@ -16,5 +16,21 @@ services:
       timeout: 3s
       retries: 10
 
+  # S3-compatible object storage for answer-note images. (MinIO stopped publishing Docker images,
+  # so RustFS is used; the app only speaks the S3 API, so any S3-compatible store works.)
+  storage:
+    image: rustfs/rustfs:latest
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: minioadmin
+      RUSTFS_SECRET_KEY: minioadmin
+      RUSTFS_VOLUMES: /data
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # web console
+    volumes:
+      - storagedata:/data
+
 volumes:
   pgdata:
+  storagedata:
