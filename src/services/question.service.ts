@@ -189,7 +189,7 @@ function visibilityFilter(user: AuthUser): Prisma.QuestionWhereInput {
 
 // The live bank: approved questions only, for every role. Restricted-client questions still
 // need a grant; reviewers see every client's. A user's own pending work is in listSubmissions.
-function liveFilter(user: AuthUser): Prisma.QuestionWhereInput {
+export function liveFilter(user: AuthUser): Prisma.QuestionWhereInput {
   if (user.permissions.includes('question:review')) return { publishedAt: { not: null } };
   return {
     publishedAt: { not: null },
@@ -233,7 +233,19 @@ export async function listQuestions(user: AuthUser, { page, limit, ...filters }:
     }),
   ]);
 
-  return { questions: rows.map((q) => toQuestionDto(user, q)), page, limit, total };
+  // Where the caller has filed each question, so the list can show Save / Saved-in-X without a call per row.
+  const saved = await prisma.savedQuestion.findMany({
+    where: { userId: user.id, questionId: { in: rows.map((q) => q.id) } },
+    select: { questionId: true, collection: { select: { id: true, name: true } } },
+  });
+  const collectionByQuestion = new Map(saved.map((s) => [s.questionId, s.collection]));
+
+  return {
+    questions: rows.map((q) => ({ ...toQuestionDto(user, q), savedIn: collectionByQuestion.get(q.id) ?? null })),
+    page,
+    limit,
+    total,
+  };
 }
 
 // Every question matching the filters, ignoring pagination. Rejects before returning if the result
@@ -706,7 +718,7 @@ async function replaceContent(tx: Prisma.TransactionClient, id: string, content:
   });
 }
 
-const questionInclude = {
+export const questionInclude = {
   client: { select: { id: true, name: true } },
   tags: { include: { tag: { include: { category: true } } } },
   reviewedBy: { select: { id: true, name: true } },
@@ -736,7 +748,7 @@ function canSeeReview(user: AuthUser, q: { authorId: string }) {
   return q.authorId === user.id || user.permissions.includes('question:review');
 }
 
-function toQuestionDto(user: AuthUser, q: QuestionRow) {
+export function toQuestionDto(user: AuthUser, q: QuestionRow) {
   const seesReview = canSeeReview(user, q);
   return {
     id: q.id,

@@ -1,0 +1,2 @@
+export const MAX_COLLECTION_NAME_LENGTH = 60;
+export const MAX_COLLECTIONS_PER_USER = 50;
