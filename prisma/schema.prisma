@@ -95,6 +95,8 @@ model User {
   passwordResetTokens PasswordResetToken[]
   auditLogs           AuditLog[]
   images              QuestionImage[]
+  collections         Collection[]
+  savedQuestions      SavedQuestion[]
 }
 
 model Client {
@@ -170,6 +172,7 @@ model Question {
   reviewedBy User?               @relation("QuestionReviewer", fields: [reviewedById], references: [id])
   draft      QuestionDraft?
   reviewLock QuestionReviewLock?
+  savedBy    SavedQuestion[]
 
   @@index([clientId])
   @@index([authorId])
@@ -283,4 +286,40 @@ model QuestionImage {
   createdBy User @relation(fields: [createdById], references: [id])
 
   @@index([createdAt])
+}
+
+// A user's private folder for saved questions. normalizedName (lowercased, whitespace-collapsed) is
+// what the per-user uniqueness is checked on, so "Frontend" and "frontend " collide.
+model Collection {
+  id             String   @id @default(uuid())
+  userId         String
+  name           String
+  normalizedName String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user  User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  saved SavedQuestion[]
+
+  @@unique([userId, normalizedName])
+  // Target of the composite FK from SavedQuestion(collectionId, userId)
+  @@unique([id, userId])
+}
+
+// A question lives in at most one of a user's collections (the PK), so "move" is an update of
+// collectionId. The composite FK to Collection(id, userId) guarantees a user can only file a
+// question into their own collection. Deleting a collection deletes its saved rows, not the questions.
+model SavedQuestion {
+  userId       String
+  questionId   String
+  collectionId String
+  savedAt      DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question   Question   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  collection Collection @relation(fields: [collectionId, userId], references: [id, userId], onDelete: Cascade)
+
+  @@id([userId, questionId])
+  @@index([collectionId, savedAt(sort: Desc)])
+  @@index([questionId])
 }

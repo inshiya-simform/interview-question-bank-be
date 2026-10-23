@@ -17,6 +17,7 @@ export const openApiSpec = {
     { name: 'Audit', description: 'Super admin: system-wide activity log' },
     { name: 'Tags', description: 'Tag categories and their tags' },
     { name: 'Questions', description: 'Interview questions' },
+    { name: 'Collections', description: 'Your personal collections and the questions you saved into them' },
   ],
   paths: {
     '/health': {
@@ -531,6 +532,174 @@ export const openApiSpec = {
             },
           },
           '401': { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/collections': {
+      get: {
+        tags: ['Collections'],
+        summary: 'List your collections (requires question:read)',
+        description: 'Alphabetical, each with the number of saved questions you can still see. totalSaved is the "All saved" count.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Your collections',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    collections: { type: 'array', items: { $ref: '#/components/schemas/Collection' } },
+                    totalSaved: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+        },
+      },
+      post: {
+        tags: ['Collections'],
+        summary: 'Create a collection (requires question:read)',
+        description: 'Names are unique per user, ignoring case and extra whitespace (409 otherwise). At most 50 collections per user.',
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/CollectionNameRequest' } } },
+        },
+        responses: {
+          '201': { description: 'Collection created', content: { 'application/json': { schema: { $ref: '#/components/schemas/Collection' } } } },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '409': { description: 'CONFLICT: name already used, or collection limit reached', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/collections/{id}': {
+      patch: {
+        tags: ['Collections'],
+        summary: 'Rename a collection (requires question:read)',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/CollectionNameRequest' } } },
+        },
+        responses: {
+          '200': { description: 'Collection renamed', content: { 'application/json': { schema: { $ref: '#/components/schemas/Collection' } } } },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+          '409': { description: 'CONFLICT: name already used', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+      delete: {
+        tags: ['Collections'],
+        summary: 'Delete a collection (requires question:read)',
+        description: 'Also removes every question saved in it from your saved list. The questions themselves are not deleted.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '204': { description: 'Collection deleted' },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
+    '/collections/saved-questions': {
+      get: {
+        tags: ['Collections'],
+        summary: 'List your saved questions (requires question:read)',
+        description: 'Newest save first. Without collectionId: everything you saved ("All saved"). Saved questions you can no longer see are left out.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+          { name: 'collectionId', in: 'query', schema: { type: 'string', format: 'uuid' }, description: 'Only questions saved in this collection' },
+        ],
+        responses: {
+          '200': {
+            description: 'Saved questions',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    questions: { type: 'array', items: { $ref: '#/components/schemas/SavedQuestion' } },
+                    collection: { allOf: [{ $ref: '#/components/schemas/Collection' }], nullable: true, description: 'The filtered collection; null for all saved' },
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    total: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
+    '/collections/saved-questions/{questionId}': {
+      put: {
+        tags: ['Collections'],
+        summary: 'Save a question, or move it to another collection (requires question:read)',
+        description: 'A question sits in at most one of your collections. Idempotent: saving an already saved question moves it. Only live questions you can see can be saved (404 otherwise).',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'questionId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['collectionId'],
+                properties: { collectionId: { type: 'string', format: 'uuid' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Question saved',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    questionId: { type: 'string', format: 'uuid' },
+                    savedIn: { $ref: '#/components/schemas/CollectionRef' },
+                    savedAt: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+      delete: {
+        tags: ['Collections'],
+        summary: 'Unsave a question (requires question:read)',
+        description: 'Removes the question from whichever collection holds it. Idempotent.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'questionId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '204': { description: 'Question is no longer saved' },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
         },
       },
     },
@@ -1227,6 +1396,11 @@ export const openApiSpec = {
             type: 'object',
             additionalProperties: { type: 'array', items: { type: 'string' } },
           },
+          savedIn: {
+            allOf: [{ $ref: '#/components/schemas/CollectionRef' }],
+            nullable: true,
+            description: 'Only on GET /questions: your collection holding this question, null if not saved',
+          },
           authorId: { type: 'string', format: 'uuid' },
           status: {
             type: 'string',
@@ -1383,6 +1557,37 @@ export const openApiSpec = {
             },
           },
         },
+      },
+      CollectionRef: {
+        type: 'object',
+        properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } },
+      },
+      Collection: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          name: { type: 'string', maxLength: 60 },
+          count: { type: 'integer', description: 'Saved questions you can see' },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      CollectionNameRequest: {
+        type: 'object',
+        required: ['name'],
+        properties: { name: { type: 'string', minLength: 1, maxLength: 60, example: 'Frontend' } },
+      },
+      SavedQuestion: {
+        allOf: [
+          { $ref: '#/components/schemas/Question' },
+          {
+            type: 'object',
+            properties: {
+              savedIn: { $ref: '#/components/schemas/CollectionRef' },
+              savedAt: { type: 'string', format: 'date-time' },
+            },
+          },
+        ],
       },
       AdminUser: {
         type: 'object',
