@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { env } from '../config/env.js';
 import { prisma } from '../db/prisma.js';
 import { Prisma } from '../generated/prisma/client.js';
+import { recordAudit, recordAuditSafe } from './audit.service.js';
 import { passwordResetEmail } from './email/templates/index.js';
 import { sendEmailSafe } from './email/email.service.js';
 import type { AuthUser } from '../types/express.js';
@@ -47,13 +48,19 @@ export async function register(input: RegisterInput) {
   if (!role) throw new Error(`Role ${DEFAULT_ROLE} is missing; run the seed`);
 
   try {
-    const user = await prisma.user.create({
-      data: {
-        email: input.email,
-        name: input.name,
-        passwordHash: await hashPassword(input.password),
-        roleId: role.id,
-      },
+    const passwordHash = await hashPassword(input.password);
+    const user = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: { email: input.email, name: input.name, passwordHash, roleId: role.id },
+      });
+      await recordAudit(tx, {
+        action: 'REGISTER',
+        module: 'AUTH',
+        entityId: created.id,
+        actor: created,
+        changes: { email: created.email, name: created.name, role: role.name },
+      });
+      return created;
     });
     return {
       user: { id: user.id, email: user.email, name: user.name, role: role.name },
@@ -73,8 +80,22 @@ export async function login(input: LoginInput) {
     include: { role: true },
   });
   const valid = await verifyPassword(input.password, user?.passwordHash ?? DUMMY_HASH);
-  if (!user || !valid) throw new AppError(401, 'UNAUTHENTICATED', 'Invalid email or password');
+  if (!user || !valid) {
+    await recordAuditSafe({
+      action: 'LOGIN_FAILED',
+      module: 'AUTH',
+      entityId: user?.id,
+      actor: { id: user?.id, email: input.email },
+    });
+    throw new AppError(401, 'UNAUTHENTICATED', 'Invalid email or password');
+  }
 
+  await recordAuditSafe({
+    action: 'LOGIN',
+    module: 'AUTH',
+    entityId: user.id,
+    actor: user,
+  });
   return {
     token: signToken(user.id),
     user: { id: user.id, email: user.email, name: user.name, role: user.role.name },
@@ -116,6 +137,13 @@ export async function forgotPassword(input: ForgotPasswordInput) {
       }),
     ]);
 
+    await recordAuditSafe({
+      action: 'PASSWORD_RESET_REQUESTED',
+      module: 'AUTH',
+      entityId: user.id,
+      actor: user,
+    });
+
     const resetUrl = `${env.frontendUrl.replace(/\/$/, '')}/reset-password?token=${token}`;
     sendEmailSafe({
       to: user.email,
@@ -152,7 +180,14 @@ export async function resetPassword(input: ResetPasswordInput) {
       data: { usedAt: new Date() },
     });
     if (consumed.count === 0) throw invalidResetLink();
-    await tx.user.update({ where: { id: record.userId }, data: { passwordHash } });
+    const user = await tx.user.update({ where: { id: record.userId }, data: { passwordHash } });
+    // The new hash is deliberately not recorded.
+    await recordAudit(tx, {
+      action: 'PASSWORD_RESET',
+      module: 'AUTH',
+      entityId: user.id,
+      actor: user,
+    });
   });
 
   return { message: 'Password has been reset. You can now log in.' };

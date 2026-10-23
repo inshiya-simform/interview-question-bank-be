@@ -271,6 +271,7 @@ Query params: `q` (keyword), `tags[<categorySlug>]=a,b` (e.g. `tags[technology]=
 
 - `QuestionHistory` row written **in the same DB transaction** as every create/update (`actorId`, `action`, `changes`, `createdAt`).
 - Structured logs (pino, JSON) for: question created, question updated, **duplicate submission rejected**, duplicate overridden, edit denied (403). Each carries `userId`, `questionId` (if any), `action`, timestamp, request id.
+- `AuditLog` is the system-wide trail, readable only by SUPER_ADMIN (`audit:read`) via `GET /admin/audit-logs`. Written in the same transaction as the change; records action, actor (id + email snapshot), module, entity, IP, time and, for updates, `{ field: { from, to } }`. Covers admin changes, question create/update/review, CSV import/export, register, login (and failed login), and password reset. Never stores passwords, hashes or tokens.
 - Rejected duplicate submissions aren't stored as questions, so they're logged (and optionally persisted in an `AuditLog` table) — the requirement is a structured trace of who and when.
 
 ## 9. Project structure

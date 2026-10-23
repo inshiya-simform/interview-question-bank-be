@@ -15,6 +15,32 @@ enum HistoryAction {
   REJECTED
 }
 
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  APPROVE
+  REJECT
+  REQUEST_CHANGES
+  GRANT_ACCESS
+  REVOKE_ACCESS
+  LOGIN
+  LOGIN_FAILED
+  REGISTER
+  PASSWORD_RESET_REQUESTED
+  PASSWORD_RESET
+  IMPORT
+  EXPORT
+}
+
+enum AuditModule {
+  AUTH
+  USER
+  CLIENT
+  CLIENT_ACCESS
+  QUESTION
+}
+
 enum QuestionStatus {
   PENDING_REVIEW
   APPROVED
@@ -67,6 +93,7 @@ model User {
   reviewedQuestions   Question[]           @relation("QuestionReviewer")
   reviewLocks         QuestionReviewLock[]
   passwordResetTokens PasswordResetToken[]
+  auditLogs           AuditLog[]
 }
 
 model Client {
@@ -220,4 +247,24 @@ model PasswordResetToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// System-wide activity trail, readable by the super admin only. actorEmail is a snapshot so the entry
+// still says who acted after the user is deleted, and for failed logins where there is no actor row.
+// changes: { field: { from, to } } for updates, otherwise a small metadata object. Never holds secrets.
+model AuditLog {
+  id         String      @id @default(uuid())
+  action     AuditAction
+  module     AuditModule
+  entityId   String?
+  actorId    String?
+  actorEmail String
+  changes    Json?
+  createdAt  DateTime    @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt(sort: Desc)])
+  @@index([module, createdAt])
+  @@index([actorId, createdAt])
 }

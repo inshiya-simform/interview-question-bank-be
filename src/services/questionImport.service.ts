@@ -11,6 +11,7 @@ import {
   MAX_IMPORT_ROWS,
   csvQuestionRowSchema,
 } from '../validators/question.validators.js';
+import { recordAudit } from './audit.service.js';
 import { findDuplicates } from './question.service.js';
 
 type RowError = { row: number; column?: string; message: string };
@@ -190,8 +191,8 @@ export async function importQuestions(user: AuthUser, buffer: Buffer) {
   }
 
   const items = rows.map((r) => ({ id: randomUUID(), ...r.data }));
-  await prisma.$transaction([
-    prisma.question.createMany({
+  await prisma.$transaction(async (tx) => {
+    await tx.question.createMany({
       data: items.map((q) => ({
         id: q.id,
         text: q.text,
@@ -200,13 +201,13 @@ export async function importQuestions(user: AuthUser, buffer: Buffer) {
         clientId: q.clientId,
         authorId: user.id,
       })),
-    }),
-    prisma.questionTag.createMany({
+    });
+    await tx.questionTag.createMany({
       data: items.flatMap((q) =>
         q.tags.flatMap(({ categoryId, tagIds }) => tagIds.map((tagId) => ({ questionId: q.id, tagId, categoryId }))),
       ),
-    }),
-    prisma.questionHistory.createMany({
+    });
+    await tx.questionHistory.createMany({
       data: items.map((q) => ({
         questionId: q.id,
         actorId: user.id,
@@ -220,8 +221,14 @@ export async function importQuestions(user: AuthUser, buffer: Buffer) {
           ...(q.duplicateOverride && { duplicateOverride: q.duplicateOverride }),
         } satisfies Prisma.InputJsonObject,
       })),
-    }),
-  ]);
+    });
+    await recordAudit(tx, {
+      action: 'IMPORT',
+      module: 'QUESTION',
+      actor: user,
+      changes: { count: items.length, questionIds: items.map((q) => q.id) },
+    });
+  });
 
   console.info(JSON.stringify({ event: 'questions_imported', userId: user.id, count: items.length }));
   return { imported: items.length, questions: items.map((q) => ({ id: q.id, text: q.text })) };
