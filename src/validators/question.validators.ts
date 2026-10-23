@@ -1,6 +1,18 @@
 import { z } from 'zod';
+import { MAX_NOTES_HTML_LENGTH, MAX_NOTES_TEXT_LENGTH } from '../constants/question.constants.js';
+import { htmlToPlainText, sanitizeNotesHtml } from '../utils/sanitizeHtml.js';
 
 const id = z.number().int().positive();
+
+// Notes are rich-text HTML: sanitized on write, and the plain-text length keeps the original 10k limit.
+const answerNotes = z
+  .string()
+  .trim()
+  .max(MAX_NOTES_HTML_LENGTH)
+  .transform(sanitizeNotesHtml)
+  .refine((html) => htmlToPlainText(html).length <= MAX_NOTES_TEXT_LENGTH, {
+    message: `Notes text must be at most ${MAX_NOTES_TEXT_LENGTH} characters`,
+  });
 
 const tagSelectionSchema = z
   .object({
@@ -12,7 +24,7 @@ const tagSelectionSchema = z
 export const createQuestionSchema = z
   .object({
     text: z.string().trim().min(1).max(2000),
-    answerNotes: z.string().trim().max(10000),
+    answerNotes,
     clientId: z.uuid().nullable().optional(),
     // [{ categoryId, tagIds }, ...] — one entry per category
     tags: z
