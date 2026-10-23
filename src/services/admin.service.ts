@@ -1,7 +1,9 @@
 import { prisma } from '../db/prisma.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { AppError } from '../utils/AppError.js';
+import type { AuthUser } from '../types/express.js';
 import { hashPassword } from '../utils/password.js';
+import { recordAudit } from './audit.service.js';
 import type {
   CreateClientInput,
   CreateStaffInput,
@@ -89,9 +91,20 @@ export async function listClients({ page, limit, search }: ListClientsQuery) {
   return { clients, page, limit, total };
 }
 
-export async function createClient({ name }: CreateClientInput) {
+export async function createClient(actor: AuthUser, { name }: CreateClientInput) {
   try {
-    return toClientAccessDto(await prisma.client.create({ data: { name }, select: clientAccessSelect }));
+    const client = await prisma.$transaction(async (tx) => {
+      const created = await tx.client.create({ data: { name }, select: clientAccessSelect });
+      await recordAudit(tx, {
+        action: 'CREATE',
+        module: 'CLIENT',
+        entityId: created.id,
+        actor,
+        changes: { name },
+      });
+      return created;
+    });
+    return toClientAccessDto(client);
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       throw new AppError(409, 'CONFLICT', 'A client with that name already exists');
@@ -107,39 +120,74 @@ async function loadClientAccess(clientId: string) {
 }
 
 // Idempotent: granting an existing grant is a no-op.
-export async function grantClientAccess(clientId: string, { email }: GrantClientAccessInput) {
+export async function grantClientAccess(
+  actor: AuthUser,
+  clientId: string,
+  { email }: GrantClientAccessInput,
+) {
   await loadClientAccess(clientId);
   const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
   if (!user) throw new AppError(404, 'NOT_FOUND', 'No user with that email');
 
-  await prisma.clientPermission.upsert({
-    where: { userId_clientId: { userId: user.id, clientId } },
-    update: {},
-    create: { userId: user.id, clientId },
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.clientPermission.findUnique({
+      where: { userId_clientId: { userId: user.id, clientId } },
+    });
+    if (existing) return; // idempotent: nothing changed, nothing to audit
+    await tx.clientPermission.create({ data: { userId: user.id, clientId } });
+    await recordAudit(tx, {
+      action: 'GRANT_ACCESS',
+      module: 'CLIENT_ACCESS',
+      entityId: clientId,
+      actor,
+      changes: { userId: user.id, email },
+    });
   });
   return loadClientAccess(clientId);
 }
 
 // Idempotent: revoking a missing grant is a no-op.
-export async function revokeClientAccess(clientId: string, userId: string) {
+export async function revokeClientAccess(actor: AuthUser, clientId: string, userId: string) {
   await loadClientAccess(clientId);
-  await prisma.clientPermission.deleteMany({ where: { clientId, userId } });
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.clientPermission.deleteMany({ where: { clientId, userId } });
+    if (count === 0) return; // idempotent: nothing changed, nothing to audit
+    await recordAudit(tx, {
+      action: 'REVOKE_ACCESS',
+      module: 'CLIENT_ACCESS',
+      entityId: clientId,
+      actor,
+      changes: { userId },
+    });
+  });
   return loadClientAccess(clientId);
 }
 
-export async function createStaff(input: CreateStaffInput) {
+export async function createStaff(actor: AuthUser, input: CreateStaffInput) {
   const role = await prisma.role.findUnique({ where: { name: input.role } });
   if (!role) throw new Error(`Role ${input.role} is missing; run the seed`);
 
   try {
-    const user = await prisma.user.create({
-      data: {
-        email: input.email,
-        name: input.name ?? input.email.split('@')[0]!,
-        roleId: role.id,
-        passwordHash: await hashPassword(DEFAULT_STAFF_PASSWORD),
-      },
-      select: userSelect,
+    const passwordHash = await hashPassword(DEFAULT_STAFF_PASSWORD);
+    const user = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          email: input.email,
+          name: input.name ?? input.email.split('@')[0]!,
+          roleId: role.id,
+          passwordHash,
+        },
+        select: userSelect,
+      });
+      // The password is deliberately not recorded.
+      await recordAudit(tx, {
+        action: 'CREATE',
+        module: 'USER',
+        entityId: created.id,
+        actor,
+        changes: { email: created.email, name: created.name, role: created.role.name },
+      });
+      return created;
     });
     return toUserDto(user);
   } catch (err) {

@@ -23,7 +23,7 @@ const taxonomy: Record<string, { name: string; tags: string[] }> = {
 const rolePermissions: Record<string, string[]> = {
   REVIEWER: ['question:read', 'question:review'],
   USER: ['question:read', 'question:create', 'question:edit_own'],
-  SUPER_ADMIN: ['user:read', 'user:create_staff', 'client:read_all', 'client:create', 'client:assign'],
+  SUPER_ADMIN: ['user:read', 'user:create_staff', 'client:read_all', 'client:create', 'client:assign', 'audit:read'],
 };
 
 async function main() {

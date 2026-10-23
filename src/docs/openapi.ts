@@ -14,6 +14,7 @@ export const openApiSpec = {
     { name: 'Auth', description: 'Registration, login and current user' },
     { name: 'Clients', description: 'Clients the caller may access' },
     { name: 'Admin', description: 'Super admin: staff accounts and client access' },
+    { name: 'Audit', description: 'Super admin: system-wide activity log' },
     { name: 'Tags', description: 'Tag categories and their tags' },
     { name: 'Questions', description: 'Interview questions' },
   ],
@@ -277,6 +278,90 @@ export const openApiSpec = {
             description: 'Email already registered',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
+        },
+      },
+    },
+    '/admin/audit-logs': {
+      get: {
+        tags: ['Audit'],
+        summary: 'List audit log entries, newest first, paginated (SUPER_ADMIN)',
+        description:
+          'Every create/update/review/access change, login, password reset and CSV import/export. `changes` holds `{ field: { from, to } }` for updates, otherwise small metadata. `search` matches the actor email.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+          {
+            name: 'module',
+            in: 'query',
+            schema: { type: 'string', enum: ['AUTH', 'USER', 'CLIENT', 'CLIENT_ACCESS', 'QUESTION'] },
+          },
+          {
+            name: 'action',
+            in: 'query',
+            schema: {
+              type: 'string',
+              enum: [
+                'CREATE',
+                'UPDATE',
+                'DELETE',
+                'APPROVE',
+                'REJECT',
+                'REQUEST_CHANGES',
+                'GRANT_ACCESS',
+                'REVOKE_ACCESS',
+                'LOGIN',
+                'LOGIN_FAILED',
+                'REGISTER',
+                'PASSWORD_RESET_REQUESTED',
+                'PASSWORD_RESET',
+                'IMPORT',
+                'EXPORT',
+              ],
+            },
+          },
+          { name: 'actorId', in: 'query', schema: { type: 'string', format: 'uuid' } },
+          { name: 'search', in: 'query', schema: { type: 'string' } },
+          { name: 'from', in: 'query', schema: { type: 'string', format: 'date-time' } },
+          { name: 'to', in: 'query', schema: { type: 'string', format: 'date-time' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Audit entries',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    logs: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string', format: 'uuid' },
+                          action: { type: 'string' },
+                          module: { type: 'string' },
+                          entityId: { type: 'string', nullable: true },
+                          actorId: { type: 'string', nullable: true },
+                          actorEmail: { type: 'string' },
+                          actorName: { type: 'string', nullable: true },
+                          actorRole: { type: 'string', nullable: true },
+                          changes: { type: 'object', nullable: true },
+                          createdAt: { type: 'string', format: 'date-time' },
+                        },
+                      },
+                    },
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    total: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
         },
       },
     },

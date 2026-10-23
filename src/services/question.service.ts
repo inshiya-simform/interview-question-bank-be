@@ -5,6 +5,7 @@ import { prisma } from '../db/prisma.js';
 import type { Prisma, QuestionStatus } from '../generated/prisma/client.js';
 import type { AuthUser } from '../types/express.js';
 import { AppError } from '../utils/AppError.js';
+import { recordAudit } from './audit.service.js';
 import { normalizeText } from '../utils/normalize.js';
 import { sendEmailSafe } from './email/email.service.js';
 import {
@@ -152,6 +153,20 @@ export async function createQuestion(user: AuthUser, input: CreateQuestionInput)
       },
     });
 
+    await recordAudit(tx, {
+      action: 'CREATE',
+      module: 'QUESTION',
+      entityId: created.id,
+      actor: user,
+      changes: {
+        text: input.text,
+        answerNotes: input.answerNotes,
+        clientId,
+        tags: input.tags.map(({ categoryId, tagIds }) => ({ categoryId, tagIds })),
+        ...(duplicateOverride && { duplicateOverride }),
+      },
+    });
+
     return created;
   });
 
@@ -234,6 +249,14 @@ export async function exportQuestions(user: AuthUser, query: ExportQuestionsQuer
       `Too many questions to export (${total}). Narrow your filters to at most ${MAX_EXPORT_ROWS}.`,
     );
   }
+
+  // Recorded before streaming starts: the export is committed to once the headers go out.
+  await recordAudit(prisma, {
+    action: 'EXPORT',
+    module: 'QUESTION',
+    actor: user,
+    changes: { count: total, filters: JSON.parse(JSON.stringify(query)) as Prisma.InputJsonObject },
+  });
 
   async function* rows() {
     for (let skip = 0; skip < total; skip += EXPORT_BATCH_SIZE) {
@@ -415,6 +438,13 @@ export async function updateQuestion(user: AuthUser, id: string, input: UpdateQu
           changes: { ...changes, ...(published && { pendingReview: true }) } as Prisma.InputJsonObject,
         },
       });
+      await recordAudit(tx, {
+        action: 'UPDATE',
+        module: 'QUESTION',
+        entityId: id,
+        actor: user,
+        changes: { ...changes, ...(published && { pendingReview: true }) } as Prisma.InputJsonObject,
+      });
     });
   }
 
@@ -434,8 +464,11 @@ export async function getQuestion(user: AuthUser, id: string) {
 
 export const approveQuestion = (user: AuthUser, id: string, { expectedUpdatedAt }: ApproveInput) =>
   review(user, id, { kind: 'approve' }, expectedUpdatedAt);
-export const requestChanges = (user: AuthUser, id: string, { note, expectedUpdatedAt }: RequestChangesInput) =>
-  review(user, id, { kind: 'requestChanges', note }, expectedUpdatedAt);
+export const requestChanges = (
+  user: AuthUser,
+  id: string,
+  { note, expectedUpdatedAt }: RequestChangesInput,
+) => review(user, id, { kind: 'requestChanges', note }, expectedUpdatedAt);
 export const rejectQuestion = (user: AuthUser, id: string, { note, expectedUpdatedAt }: RejectInput) =>
   review(user, id, { kind: 'reject', note }, expectedUpdatedAt);
 
@@ -560,17 +593,20 @@ async function applyReview(user: AuthUser, id: string, action: ReviewAction, exp
   let status: QuestionStatus;
   let note: string | null = null;
   let historyAction: 'APPROVED' | 'CHANGES_REQUESTED' | 'REJECTED';
+  let auditAction: 'APPROVE' | 'REQUEST_CHANGES' | 'REJECT';
   let changes: Prisma.InputJsonObject;
   switch (action.kind) {
     case 'approve':
       status = 'APPROVED';
       historyAction = 'APPROVED';
+      auditAction = 'APPROVE';
       changes = { appliedDraft: !!draft };
       break;
     case 'requestChanges':
       status = 'CHANGES_REQUESTED';
       note = action.note;
       historyAction = 'CHANGES_REQUESTED';
+      auditAction = 'REQUEST_CHANGES';
       changes = { note };
       break;
     case 'reject':
@@ -578,6 +614,7 @@ async function applyReview(user: AuthUser, id: string, action: ReviewAction, exp
       status = published ? 'APPROVED' : 'REJECTED';
       note = action.note ?? null;
       historyAction = 'REJECTED';
+      auditAction = 'REJECT';
       changes = { note, discardedDraft: !!draft, status };
       break;
   }
@@ -617,6 +654,13 @@ async function applyReview(user: AuthUser, id: string, action: ReviewAction, exp
 
     await tx.questionHistory.create({
       data: { questionId: id, actorId: user.id, action: historyAction, changes },
+    });
+    await recordAudit(tx, {
+      action: auditAction,
+      module: 'QUESTION',
+      entityId: id,
+      actor: user,
+      changes: { ...changes, fromStatus: existing.status, toStatus: status },
     });
   });
 
