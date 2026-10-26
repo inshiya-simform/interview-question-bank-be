@@ -14,6 +14,9 @@ const previews = {
   'question-rejected': t.questionRejectedEmail({ authorName: 'Asha Patel', reviewerName: 'Rohan Mehta', questionText: q, note: 'This duplicates an existing question in the bank.', isEdit: false }),
   'password-reset': t.passwordResetEmail({ name: 'Asha Patel', resetUrl: 'http://localhost:5173/reset-password?token=abc123', expiresInMinutes: 30 }),
   welcome: t.welcomeEmail({ name: 'Asha Patel' }),
+  passwordChanged: t.passwordChangedEmail({ name: 'Asha Patel' }),
+  clientAccessGranted: t.clientAccessGrantedEmail({ name: 'Asha Patel', clientName: 'Acme Corp' }),
+  clientAccessRevoked: t.clientAccessRevokedEmail({ name: 'Asha Patel', clientName: 'Acme Corp' }),
   staffWelcome: t.staffWelcomeEmail({ name: 'Asha Patel', role: 'REVIEWER', resetUrl: 'https://example.com/reset-password?token=abc', expiresInHours: 72 }),
 };
 

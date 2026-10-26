@@ -5,3 +5,5 @@ export { staffWelcomeEmail } from './staffWelcome.template.js';
 export { questionApprovedEmail } from './questionApproved.template.js';
 export { questionChangesRequestedEmail } from './questionChangesRequested.template.js';
 export { questionRejectedEmail } from './questionRejected.template.js';
+export { passwordChangedEmail } from './passwordChanged.template.js';
+export { clientAccessGrantedEmail, clientAccessRevokedEmail } from './clientAccess.template.js';
