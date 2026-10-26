@@ -173,28 +173,38 @@ export async function createQuestion(user: AuthUser, input: CreateQuestionInput)
   return toDetailDto(user, question);
 }
 
-// Who may open a single question (and edit or review it). Reviewers see everything, in any status.
-// Everyone else sees a question only once it has been approved (publishedAt), and then only if it
-// is unrestricted or belongs to a client they hold a grant on. Authors always see their own
+// Questions that are unrestricted, or belong to a client the user holds a grant on.
+function clientAccessFilter(user: AuthUser): Prisma.QuestionWhereInput {
+  return { OR: [{ clientId: null }, { clientId: { in: user.clientIds } }] };
+}
+
+// Who may open a single question (and edit or review it). Reviewers see every status, but like
+// everyone else only unrestricted questions and those of clients they hold a grant on. Everyone else
+// sees a question only once it has been approved (publishedAt). Authors always see their own
 // questions, whatever their status.
 function visibilityFilter(user: AuthUser): Prisma.QuestionWhereInput {
-  if (user.permissions.includes('question:review')) return {};
+  if (user.permissions.includes('question:review')) return clientAccessFilter(user);
 
   const visible: Prisma.QuestionWhereInput[] = [
-    { publishedAt: { not: null }, OR: [{ clientId: null }, { clientId: { in: user.clientIds } }] },
+    { publishedAt: { not: null }, ...clientAccessFilter(user) },
   ];
   if (user.permissions.includes('question:edit_own')) visible.push({ authorId: user.id });
   return { OR: visible };
 }
 
+// A pending edit can move a question to another client. The live row still shows the old client, so
+// a reviewer is also kept away from edits that target a client they hold no grant on.
+async function reviewerDraftFilter(user: AuthUser): Promise<Prisma.QuestionWhereInput> {
+  if (!user.permissions.includes('question:review')) return {};
+  const blocked = await prisma.client.findMany({ where: { id: { notIn: user.clientIds } }, select: { id: true } });
+  if (blocked.length === 0) return {};
+  return { NOT: { draft: { OR: blocked.map(({ id }) => ({ payload: { path: ['clientId'], equals: id } })) } } };
+}
+
 // The live bank: approved questions only, for every role. Restricted-client questions still
-// need a grant; reviewers see every client's. A user's own pending work is in listSubmissions.
+// need a grant, reviewers included. A user's own pending work is in listSubmissions.
 export function liveFilter(user: AuthUser): Prisma.QuestionWhereInput {
-  if (user.permissions.includes('question:review')) return { publishedAt: { not: null } };
-  return {
-    publishedAt: { not: null },
-    OR: [{ clientId: null }, { clientId: { in: user.clientIds } }],
-  };
+  return { publishedAt: { not: null }, ...clientAccessFilter(user) };
 }
 
 // Shared by the list and the export so both always cover the same set of questions.
@@ -301,12 +311,12 @@ export async function exportQuestions(user: AuthUser, query: ExportQuestionsQuer
 
 const NOT_LIVE: QuestionStatus[] = ['PENDING_REVIEW', 'CHANGES_REQUESTED', 'REJECTED'];
 
-// Review work: reviewers see every author's submissions (their queue), everyone else only their own.
+// Review work: reviewers see the submissions of every author (their queue) that they may access, everyone else only their own.
 // An approved question with an edit waiting for review is PENDING_REVIEW, so it shows up here too.
 export async function listSubmissions(user: AuthUser, { page, limit, status, sort }: ListSubmissionsQuery) {
   const isReviewer = user.permissions.includes('question:review');
   const where: Prisma.QuestionWhereInput = {
-    ...(isReviewer ? {} : { authorId: user.id }),
+    ...(isReviewer ? { AND: [clientAccessFilter(user), await reviewerDraftFilter(user)] } : { authorId: user.id }),
     status: { in: status ?? NOT_LIVE },
   };
   const direction = (sort ?? (isReviewer ? 'submitted_asc' : 'submitted_desc')) === 'submitted_asc' ? 'asc' : 'desc';
@@ -333,7 +343,7 @@ export async function countQuestions(user: AuthUser) {
 
   const rows = await prisma.question.groupBy({
     by: ['status'],
-    where: { AND: [visibilityFilter(user), ...(isReviewer ? [] : [{ authorId: user.id }])] },
+    where: { AND: [visibilityFilter(user), await reviewerDraftFilter(user), ...(isReviewer ? [] : [{ authorId: user.id }])] },
     _count: { _all: true },
   });
 
@@ -479,7 +489,7 @@ export async function updateQuestion(user: AuthUser, id: string, input: UpdateQu
 export async function getQuestion(user: AuthUser, id: string) {
   // Invisible questions look the same as nonexistent ones.
   const q = await prisma.question.findFirst({
-    where: { AND: [{ id }, visibilityFilter(user)] },
+    where: { AND: [{ id }, visibilityFilter(user), await reviewerDraftFilter(user)] },
     include: questionInclude,
   });
   if (!q) throw new AppError(404, 'NOT_FOUND', 'Question not found');
@@ -536,11 +546,24 @@ async function reviewState(id: string) {
   return { status: q.status, updatedAt: q.updatedAt, reviewLock: activeLock(q.reviewLock) };
 }
 
-export const getReviewState = (_user: AuthUser, id: string) => reviewState(id);
+// A reviewer can only act on questions they can see: unrestricted, or a client they hold a grant on.
+async function assertReviewable(user: AuthUser, id: string) {
+  const visible = await prisma.question.findFirst({
+    where: { AND: [{ id }, visibilityFilter(user), await reviewerDraftFilter(user)] },
+    select: { id: true },
+  });
+  if (!visible) throw new AppError(404, 'NOT_FOUND', 'Question not found');
+}
+
+export async function getReviewState(user: AuthUser, id: string) {
+  await assertReviewable(user, id);
+  return reviewState(id);
+}
 
 // Claims the question for the caller, or renews their claim (call it as a heartbeat). One statement,
 // so two reviewers racing for a free question can't both get it. Takes over a lapsed claim.
 export async function acquireReviewLock(user: AuthUser, id: string) {
+  await assertReviewable(user, id);
   const now = new Date();
   const expiresAt = new Date(now.getTime() + REVIEW_LOCK_TTL_MS);
   // Times are passed in rather than using now(), so they compare in UTC like the rest of Prisma's timestamps.
@@ -606,6 +629,7 @@ async function applyReview(user: AuthUser, id: string, action: ReviewAction, exp
     include: { draft: true, author: { select: { id: true, name: true, email: true } } },
   });
   if (!existing) throw new AppError(404, 'NOT_FOUND', 'Question not found');
+  await assertReviewable(user, id);
   if (existing.status !== 'PENDING_REVIEW') throw await reviewConflict(id);
   if (expectedUpdatedAt && new Date(expectedUpdatedAt).getTime() !== existing.updatedAt.getTime()) {
     throw await reviewConflict(id);

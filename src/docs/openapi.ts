@@ -708,7 +708,7 @@ export const openApiSpec = {
         tags: ['Questions'],
         summary: 'List live (approved) questions (requires question:read)',
         description:
-          'The question bank: approved questions only, for every role. Questions with no client or a client the user holds a grant on; reviewers see every client. A user\'s own unapproved questions are not listed here: see GET /questions/submissions.',
+          'The question bank: approved questions only, for every role. Questions with no client or a client the user holds a grant on. A user\'s own unapproved questions are not listed here: see GET /questions/submissions.',
         security: [{ bearerAuth: [] }],
         parameters: [
           { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
