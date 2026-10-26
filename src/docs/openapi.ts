@@ -1429,6 +1429,14 @@ export const openApiSpec = {
           isLive: { type: 'boolean', description: 'Author and reviewers only: has been approved before. With hasDraft this is an edit of a live question (EDIT); without it, a new submission (NEW).' },
           submittedAt: { type: 'string', format: 'date-time', description: 'Author and reviewers only: when it was created or last (re)submitted for review' },
           hasDraft: { type: 'boolean', description: 'Author and reviewers only: an edit is waiting for review' },
+          duplicateOverride: {
+            type: 'object',
+            description: 'Reviewers only, while PENDING_REVIEW: present when the author confirmed the latest submission is distinct from suspected duplicates',
+            properties: {
+              reason: { type: 'string' },
+              matches: { type: 'array', description: 'The suspected duplicates the reviewer can see', items: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, text: { type: 'string' } } } },
+            },
+          },
           reviewLock: {
             type: 'object',
             nullable: true,

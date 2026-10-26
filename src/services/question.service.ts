@@ -844,6 +844,49 @@ function activeLock(lock: LockRow) {
   return lock && lock.expiresAt > new Date() ? { lockedBy: lock.lockedBy, expiresAt: lock.expiresAt } : null;
 }
 
+// The reason an author gave for submitting a suspected duplicate, shown to reviewers while the
+// question awaits review. It lives on the latest submission (CREATED or UPDATED history entry), so
+// a later edit without the override drops it. Matches are limited to questions the reviewer can see.
+async function loadDuplicateOverrides(user: AuthUser, rows: QuestionRow[]) {
+  const result = new Map<string, { reason: string; matches: { id: string; text: string }[] }>();
+  if (!user.permissions.includes('question:review')) return result;
+  const pendingIds = rows.filter((q) => q.status === 'PENDING_REVIEW').map((q) => q.id);
+  if (pendingIds.length === 0) return result;
+
+  const history = await prisma.questionHistory.findMany({
+    where: { questionId: { in: pendingIds }, action: { in: ['CREATED', 'UPDATED'] } },
+    orderBy: { createdAt: 'desc' },
+    select: { questionId: true, changes: true },
+  });
+  const latest = new Map<string, { reason: string; matchedIds: string[] }>();
+  for (const h of history) {
+    if (latest.has(h.questionId) || result.has(h.questionId)) continue;
+    const o = (h.changes as { duplicateOverride?: { reason: string; matchedIds: string[] } } | null)?.duplicateOverride;
+    // The first entry per question is its latest submission, with or without an override.
+    latest.set(h.questionId, o ?? { reason: '', matchedIds: [] });
+  }
+
+  const wanted = [...latest.values()].filter((o) => o.reason);
+  const matchIds = [...new Set(wanted.flatMap((o) => o.matchedIds))];
+  const visible =
+    matchIds.length > 0
+      ? await prisma.question.findMany({
+          where: { AND: [{ id: { in: matchIds } }, visibilityFilter(user)] },
+          select: { id: true, text: true },
+        })
+      : [];
+  const textById = new Map(visible.map((q) => [q.id, q.text]));
+
+  for (const [questionId, o] of latest) {
+    if (!o.reason) continue;
+    result.set(questionId, {
+      reason: o.reason,
+      matches: o.matchedIds.flatMap((id) => (textById.has(id) ? [{ id, text: textById.get(id)! }] : [])),
+    });
+  }
+  return result;
+}
+
 // Adds each pending edit, resolved to the same shape as the live content. Author and reviewers only.
 // Tags and clients for all rows are loaded in one query each, so a page costs two extra queries.
 async function withDrafts(user: AuthUser, rows: QuestionRow[]) {
@@ -861,9 +904,11 @@ async function withDrafts(user: AuthUser, rows: QuestionRow[]) {
   ]);
   const tagById = new Map(tags.map((t) => [t.id, t]));
   const clientById = new Map(clients.map((c) => [c.id, c]));
+  const overrides = await loadDuplicateOverrides(user, rows);
 
   return rows.map((q, i) => {
-    const dto = toQuestionDto(user, q);
+    const override = overrides.get(q.id);
+    const dto = { ...toQuestionDto(user, q), ...(override && { duplicateOverride: override }) };
     const d = drafts[i];
     if (!d) return dto;
     return {
