@@ -2,8 +2,12 @@ import { prisma } from '../db/prisma.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { AppError } from '../utils/AppError.js';
 import type { AuthUser } from '../types/express.js';
+import { randomBytes } from 'node:crypto';
 import { hashPassword } from '../utils/password.js';
 import { recordAudit } from './audit.service.js';
+import { createPasswordResetLink } from './auth.service.js';
+import { staffWelcomeEmail } from './email/templates/index.js';
+import { sendEmailSafe } from './email/email.service.js';
 import type {
   CreateClientInput,
   CreateStaffInput,
@@ -12,8 +16,8 @@ import type {
   ListUsersQuery,
 } from '../validators/admin.validators.js';
 
-// Staff accounts start with this password; the super admin hands it over out of band.
-const DEFAULT_STAFF_PASSWORD = 'password123';
+// Staff set their own password through the emailed link, so the initial one is random and never shared.
+const STAFF_WELCOME_LINK_EXPIRY_MINUTES = 72 * 60;
 
 const userSelect = {
   id: true,
@@ -168,7 +172,7 @@ export async function createStaff(actor: AuthUser, input: CreateStaffInput) {
   if (!role) throw new Error(`Role ${input.role} is missing; run the seed`);
 
   try {
-    const passwordHash = await hashPassword(DEFAULT_STAFF_PASSWORD);
+    const passwordHash = await hashPassword(randomBytes(32).toString('hex'));
     const user = await prisma.$transaction(async (tx) => {
       const created = await tx.user.create({
         data: {
@@ -188,6 +192,17 @@ export async function createStaff(actor: AuthUser, input: CreateStaffInput) {
         changes: { email: created.email, name: created.name, role: created.role.name },
       });
       return created;
+    });
+
+    const resetUrl = await createPasswordResetLink(user.id, STAFF_WELCOME_LINK_EXPIRY_MINUTES);
+    sendEmailSafe({
+      to: user.email,
+      ...staffWelcomeEmail({
+        name: user.name,
+        role: user.role.name,
+        resetUrl,
+        expiresInHours: STAFF_WELCOME_LINK_EXPIRY_MINUTES / 60,
+      }),
     });
     return toUserDto(user);
   } catch (err) {

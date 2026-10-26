@@ -259,7 +259,7 @@ export const openApiSpec = {
       },
       post: {
         tags: ['Admin'],
-        summary: 'Create a reviewer with the default password (SUPER_ADMIN)',
+        summary: 'Create a reviewer and email them a set-password link (SUPER_ADMIN)',
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,

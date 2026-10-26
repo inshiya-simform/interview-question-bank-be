@@ -130,22 +130,29 @@ export async function getMe(userId: string) {
 const hashResetToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
 // Always resolves the same way so the response never reveals whether an email is registered.
+// Replaces any unused reset tokens for the user and returns the frontend link for a fresh one.
+export async function createPasswordResetLink(userId: string, expiresInMinutes: number) {
+  const token = randomBytes(32).toString('hex');
+
+  await prisma.$transaction([
+    prisma.passwordResetToken.deleteMany({ where: { userId, usedAt: null } }),
+    prisma.passwordResetToken.create({
+      data: {
+        userId,
+        tokenHash: hashResetToken(token),
+        expiresAt: new Date(Date.now() + expiresInMinutes * 60_000),
+      },
+    }),
+  ]);
+
+  return `${env.frontendUrl.replace(/\/$/, '')}/reset-password?token=${token}`;
+}
+
 export async function forgotPassword(input: ForgotPasswordInput) {
   const user = await prisma.user.findUnique({ where: { email: input.email } });
   if (user) {
-    const token = randomBytes(32).toString('hex');
     const expiresInMinutes = env.passwordResetExpiryMinutes;
-
-    await prisma.$transaction([
-      prisma.passwordResetToken.deleteMany({ where: { userId: user.id, usedAt: null } }),
-      prisma.passwordResetToken.create({
-        data: {
-          userId: user.id,
-          tokenHash: hashResetToken(token),
-          expiresAt: new Date(Date.now() + expiresInMinutes * 60_000),
-        },
-      }),
-    ]);
+    const resetUrl = await createPasswordResetLink(user.id, expiresInMinutes);
 
     await recordAuditSafe({
       action: 'PASSWORD_RESET_REQUESTED',
@@ -154,7 +161,6 @@ export async function forgotPassword(input: ForgotPasswordInput) {
       actor: user,
     });
 
-    const resetUrl = `${env.frontendUrl.replace(/\/$/, '')}/reset-password?token=${token}`;
     sendEmailSafe({
       to: user.email,
       ...passwordResetEmail({ name: user.name, resetUrl, expiresInMinutes }),
