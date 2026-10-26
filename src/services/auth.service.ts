@@ -10,6 +10,7 @@ import { AppError } from '../utils/AppError.js';
 import { signToken } from '../utils/jwt.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
 import type {
+  ChangePasswordInput,
   ForgotPasswordInput,
   LoginInput,
   RegisterInput,
@@ -38,9 +39,18 @@ const toAuthUser = (user: UserWithAuth): AuthUser => ({
   clientIds: user.permissions.map((cp) => cp.clientId),
 });
 
-export async function loadAuthUser(userId: string): Promise<AuthUser | null> {
+// issuedAt (ms) is the token's iat; a token older than the last password change is revoked.
+export async function loadAuthUser(userId: string, issuedAt?: number): Promise<AuthUser | null> {
   const user = await prisma.user.findUnique({ where: { id: userId }, include: authInclude });
-  return user ? toAuthUser(user) : null;
+  if (!user) return null;
+  if (
+    issuedAt !== undefined &&
+    user.passwordChangedAt &&
+    issuedAt < Math.floor(user.passwordChangedAt.getTime() / 1000) * 1000
+  ) {
+    throw new AppError(401, 'UNAUTHENTICATED', 'Session expired, please log in again');
+  }
+  return toAuthUser(user);
 }
 
 export async function register(input: RegisterInput) {
@@ -180,7 +190,10 @@ export async function resetPassword(input: ResetPasswordInput) {
       data: { usedAt: new Date() },
     });
     if (consumed.count === 0) throw invalidResetLink();
-    const user = await tx.user.update({ where: { id: record.userId }, data: { passwordHash } });
+    const user = await tx.user.update({
+      where: { id: record.userId },
+      data: { passwordHash, passwordChangedAt: new Date() },
+    });
     // The new hash is deliberately not recorded.
     await recordAudit(tx, {
       action: 'PASSWORD_RESET',
@@ -191,4 +204,21 @@ export async function resetPassword(input: ResetPasswordInput) {
   });
 
   return { message: 'Password has been reset. You can now log in.' };
+}
+
+export async function changePassword(userId: string, input: ChangePasswordInput) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new AppError(401, 'UNAUTHENTICATED', 'User no longer exists');
+  if (!(await verifyPassword(input.currentPassword, user.passwordHash))) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Current password is incorrect');
+  }
+
+  const passwordHash = await hashPassword(input.password);
+  await prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash, passwordChangedAt: new Date() },
+  });
+
+  // Other sessions are now revoked; hand back a fresh token so this one stays signed in.
+  return { token: signToken(userId), message: 'Password changed' };
 }

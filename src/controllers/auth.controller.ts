@@ -30,6 +30,14 @@ export const myPermissions: RequestHandler = (req, res) => {
   res.json({ role, permissions, clientIds });
 };
 
+export const changePassword: RequestHandler = async (req, res, next) => {
+  try {
+    res.json(await authService.changePassword(req.user!.id, req.body));
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const forgotPassword: RequestHandler = async (req, res, next) => {
   try {
     res.json(await authService.forgotPassword(req.body));

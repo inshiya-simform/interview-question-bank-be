@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  changePassword,
   forgotPassword,
   login,
   me,
@@ -12,6 +13,7 @@ import { authenticate } from '../middlewares/authenticate.js';
 import { passwordResetLimiter } from '../middlewares/rateLimit.js';
 import { validate } from '../middlewares/validate.js';
 import {
+  changePasswordSchema,
   forgotPasswordSchema,
   loginSchema,
   registerSchema,
@@ -31,6 +33,13 @@ router.post(
   verifyResetToken,
 );
 router.post('/reset-password', passwordResetLimiter, validate(resetPasswordSchema), resetPassword);
+router.post(
+  '/change-password',
+  authenticate,
+  passwordResetLimiter,
+  validate(changePasswordSchema),
+  changePassword,
+);
 router.get('/me', authenticate, me);
 router.get('/permissions', authenticate, myPermissions);
 

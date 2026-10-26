@@ -10,7 +10,8 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
       throw new AppError(401, 'UNAUTHENTICATED', 'Missing bearer token');
     }
 
-    const user = await loadAuthUser(verifyToken(token));
+    const { userId, issuedAt } = verifyToken(token);
+    const user = await loadAuthUser(userId, issuedAt);
     if (!user) throw new AppError(401, 'UNAUTHENTICATED', 'User no longer exists');
 
     req.user = user;
