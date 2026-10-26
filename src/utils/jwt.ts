@@ -10,11 +10,11 @@ export function signToken(userId: string): string {
   });
 }
 
-export function verifyToken(token: string): string {
+export function verifyToken(token: string): { userId: string; issuedAt: number } {
   try {
     const payload = jwt.verify(token, env.jwtSecret, { algorithms: ['HS256'] });
     if (typeof payload === 'string' || !payload.sub) throw new Error('Malformed token');
-    return payload.sub;
+    return { userId: payload.sub, issuedAt: (payload.iat ?? 0) * 1000 };
   } catch {
     throw new AppError(401, 'UNAUTHENTICATED', 'Invalid or expired token');
   }

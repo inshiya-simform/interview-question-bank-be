@@ -78,12 +78,14 @@ model RolePermission {
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  name         String
-  passwordHash String
-  roleId       Int
-  createdAt    DateTime @default(now())
+  id                String    @id @default(uuid())
+  email             String    @unique
+  name              String
+  passwordHash      String
+  // Tokens issued before this moment are rejected (set on password reset/change).
+  passwordChangedAt DateTime?
+  roleId            Int
+  createdAt         DateTime  @default(now())
 
   role Role @relation(fields: [roleId], references: [id])
 
