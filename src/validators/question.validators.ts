@@ -116,8 +116,8 @@ export const listQuestionsQuerySchema = z
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(100).default(20),
     clientId: z.uuid().optional(),
-    tags: idList.optional(), // matches questions having ANY of these tag ids
-    categories: idList.optional(), // matches questions having a tag in ANY of these categories
+    tags: idList.optional(), // ANY of the tag ids within a category, ALL categories must match
+    categories: idList.optional(), // questions must have a tag in EACH of these categories
     search: z.string().trim().min(1).max(200).optional(),
   })
   .strict();
