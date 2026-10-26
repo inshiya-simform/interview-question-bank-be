@@ -21,7 +21,7 @@ import {
   updateQuestion,
 } from '../controllers/question.controller.js';
 import { authenticate } from '../middlewares/authenticate.js';
-import { requirePermission } from '../middlewares/requirePermission.js';
+import { requireAnyPermission, requirePermission } from '../middlewares/requirePermission.js';
 import { uploadCsv } from '../middlewares/uploadCsv.js';
 import { validate } from '../middlewares/validate.js';
 import {
@@ -49,7 +49,12 @@ router.get('/:id/review-state', requirePermission('question:review'), getReviewS
 router.post('/', requirePermission('question:create'), validate(createQuestionSchema), createQuestion);
 router.get('/import/template', requirePermission('question:create'), downloadImportTemplate);
 router.post('/import', requirePermission('question:create'), uploadCsv, importQuestions);
-router.post('/check-duplicate', requirePermission('question:create'), validate(checkDuplicateSchema), checkDuplicate);
+router.post(
+  '/check-duplicate',
+  requireAnyPermission('question:create', 'question:edit_own'),
+  validate(checkDuplicateSchema),
+  checkDuplicate,
+);
 router.patch(
   '/:id',
   // Ownership is enforced in the service: edit_own only covers the caller's own questions.
