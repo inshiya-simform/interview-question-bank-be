@@ -62,7 +62,9 @@ const MAX_DUPLICATE_MATCHES = 5;
 const DUPLICATE_CANDIDATES = 50;
 
 // Compares against questions the user can see only, so a match never reveals a hidden question.
-export async function findDuplicates(user: AuthUser, text: string) {
+// Scoped to the target client: a client's question is compared with that client's questions only,
+// an unrestricted one (clientId null) with unrestricted questions only.
+export async function findDuplicates(user: AuthUser, text: string, clientId: string | null, excludeId?: string) {
   const normalized = normalizeText(text);
   if (!normalized) return [];
   const threshold = env.duplicateSimilarityThreshold;
@@ -80,20 +82,47 @@ export async function findDuplicates(user: AuthUser, text: string) {
   if (candidates.length === 0) return [];
 
   const visible = await prisma.question.findMany({
-    where: { AND: [{ id: { in: candidates.map((c) => c.id) } }, visibilityFilter(user)] },
+    where: { AND: [{ id: { in: candidates.map((c) => c.id) } }, { clientId }, visibilityFilter(user)] },
     select: { id: true, text: true },
   });
   const byId = new Map(visible.map((q) => [q.id, q.text]));
 
   return candidates
-    .filter((c) => byId.has(c.id))
+    .filter((c) => byId.has(c.id) && c.id !== excludeId)
     .slice(0, MAX_DUPLICATE_MATCHES)
     .map((c) => ({ id: c.id, text: byId.get(c.id)!, similarity: Math.round(c.similarity * 100) / 100 }));
 }
 
-export async function checkDuplicate(user: AuthUser, { text }: CheckDuplicateInput) {
-  const matches = await findDuplicates(user, text);
+export async function checkDuplicate(user: AuthUser, { text, clientId, excludeId }: CheckDuplicateInput) {
+  if (clientId && !user.clientIds.includes(clientId)) {
+    throw new AppError(404, 'NOT_FOUND', 'Client not found');
+  }
+  const matches = await findDuplicates(user, text, clientId ?? null, excludeId);
   return { isDuplicate: matches.length > 0, matches };
+}
+
+// Near-duplicates are surfaced, not silently stored; the author may override by
+// confirming the question is genuinely different and saying why.
+async function resolveDuplicateOverride(
+  user: AuthUser,
+  input: { text: string; confirmDistinct?: boolean | undefined; distinctReason?: string | undefined },
+  clientId: string | null,
+  excludeId?: string,
+) {
+  const duplicates = await findDuplicates(user, input.text, clientId, excludeId);
+  if (duplicates.length === 0) return undefined;
+  if (!input.confirmDistinct) {
+    console.info(JSON.stringify({ event: 'duplicate_rejected', userId: user.id, matchedIds: duplicates.map((d) => d.id) }));
+    throw new AppError(409, 'DUPLICATE_SUSPECTED', 'This question looks like an existing one', { matches: duplicates });
+  }
+  if (!input.distinctReason) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'distinctReason is required when confirmDistinct is true', [
+      { path: ['distinctReason'], message: 'Explain how this question differs from the matches' },
+    ]);
+  }
+  const override = { matchedIds: duplicates.map((d) => d.id), reason: input.distinctReason };
+  console.info(JSON.stringify({ event: 'duplicate_overridden', userId: user.id, ...override }));
+  return override;
 }
 
 export async function createQuestion(user: AuthUser, input: CreateQuestionInput) {
@@ -106,23 +135,7 @@ export async function createQuestion(user: AuthUser, input: CreateQuestionInput)
 
   const found = await resolveTags(input.tags);
 
-  // Near-duplicates are surfaced, not silently stored; the author may override by
-  // confirming the question is genuinely different and saying why.
-  const duplicates = await findDuplicates(user, input.text);
-  let duplicateOverride: { matchedIds: string[]; reason: string } | undefined;
-  if (duplicates.length > 0) {
-    if (!input.confirmDistinct) {
-      console.info(JSON.stringify({ event: 'duplicate_rejected', userId: user.id, matchedIds: duplicates.map((d) => d.id) }));
-      throw new AppError(409, 'DUPLICATE_SUSPECTED', 'This question looks like an existing one', { matches: duplicates });
-    }
-    if (!input.distinctReason) {
-      throw new AppError(400, 'VALIDATION_ERROR', 'distinctReason is required when confirmDistinct is true', [
-        { path: ['distinctReason'], message: 'Explain how this question differs from the matches' },
-      ]);
-    }
-    duplicateOverride = { matchedIds: duplicates.map((d) => d.id), reason: input.distinctReason };
-    console.info(JSON.stringify({ event: 'duplicate_overridden', userId: user.id, ...duplicateOverride }));
-  }
+  const duplicateOverride = await resolveDuplicateOverride(user, input, clientId);
 
   //transaction because we want either both question and question history to be created or none of them
   const question = await prisma.$transaction(async (tx) => {
@@ -180,15 +193,15 @@ function clientAccessFilter(user: AuthUser): Prisma.QuestionWhereInput {
 
 // Who may open a single question (and edit or review it). Reviewers see every status, but like
 // everyone else only unrestricted questions and those of clients they hold a grant on. Everyone else
-// sees a question only once it has been approved (publishedAt). Authors always see their own
-// questions, whatever their status.
+// sees a question only once it has been approved (publishedAt). Authors also see their own
+// questions, whatever their status, while they still hold a grant on its client.
 function visibilityFilter(user: AuthUser): Prisma.QuestionWhereInput {
   if (user.permissions.includes('question:review')) return clientAccessFilter(user);
 
   const visible: Prisma.QuestionWhereInput[] = [
     { publishedAt: { not: null }, ...clientAccessFilter(user) },
   ];
-  if (user.permissions.includes('question:edit_own')) visible.push({ authorId: user.id });
+  if (user.permissions.includes('question:edit_own')) visible.push({ authorId: user.id, ...clientAccessFilter(user) });
   return { OR: visible };
 }
 
@@ -422,6 +435,19 @@ export async function updateQuestion(user: AuthUser, id: string, input: UpdateQu
 
   const next: DraftPayload = { ...base };
   const changes: Record<string, unknown> = {};
+
+  // Editing must not be a way around the check made on create. Moving a question to another
+  // client is checked too, since duplicates are scoped per client.
+  const textChanged = input.text !== undefined && input.text !== base.text;
+  if (textChanged || clientChanged) {
+    const duplicateOverride = await resolveDuplicateOverride(
+      user,
+      { ...input, text: input.text ?? base.text },
+      clientChanged ? (input.clientId ?? null) : base.clientId,
+      id,
+    );
+    if (duplicateOverride) changes.duplicateOverride = duplicateOverride;
+  }
   if (input.text !== undefined && input.text !== base.text) {
     next.text = input.text;
     changes.text = { from: base.text, to: input.text };

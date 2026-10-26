@@ -42,11 +42,18 @@ export const createQuestionSchema = z
 
 // Partial update: omitted fields are unchanged; tags, when present, replace the full set.
 export const updateQuestionSchema = createQuestionSchema
-  .omit({ confirmDistinct: true, distinctReason: true })
   .partial()
   .refine((v) => Object.keys(v).length > 0, 'At least one field must be provided');
 
-export const checkDuplicateSchema = z.object({ text: createQuestionSchema.shape.text }).strict();
+// clientId scopes the check to that client's questions (omit or null for unrestricted ones);
+// excludeId leaves out the question being edited.
+export const checkDuplicateSchema = z
+  .object({
+    text: createQuestionSchema.shape.text,
+    clientId: z.uuid().nullable().optional(),
+    excludeId: z.uuid().optional(),
+  })
+  .strict();
 
 const reviewNote = z.string().trim().max(1000);
 

@@ -170,7 +170,7 @@ export async function importQuestions(user: AuthUser, buffer: Buffer) {
   for (let i = 0; i < rows.length; i += BATCH) {
     await Promise.all(
       rows.slice(i, i + BATCH).map(async (r) => {
-        const matches = await findDuplicates(user, r.data.text);
+        const matches = await findDuplicates(user, r.data.text, r.data.clientId);
         if (matches.length === 0) return;
         if (!r.confirmDistinct) {
           errors.push({

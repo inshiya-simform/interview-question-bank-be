@@ -842,9 +842,9 @@ export const openApiSpec = {
     '/questions/check-duplicate': {
       post: {
         tags: ['Questions'],
-        summary: 'Check whether question text duplicates an existing one (requires question:create)',
+        summary: 'Check whether question text duplicates an existing one (requires question:create or question:edit_own)',
         description:
-          'Dry run: stores nothing. Compares only against questions the user can see. Call while the user types, then show the matches and let them mark the question as genuinely different (confirmDistinct on POST /questions).',
+          'Dry run: stores nothing. Compares only against questions the user can see, within the given client (or unrestricted questions when no client is given). Call while the user types, then show the matches and let them mark the question as genuinely different (confirmDistinct on POST /questions).',
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -854,7 +854,11 @@ export const openApiSpec = {
                 type: 'object',
                 required: ['text'],
                 additionalProperties: false,
-                properties: { text: { type: 'string', minLength: 1, maxLength: 2000 } },
+                properties: {
+                  text: { type: 'string', minLength: 1, maxLength: 2000 },
+                  clientId: { type: 'string', format: 'uuid', nullable: true, description: 'Compare against this client\'s questions only; omit or null for unrestricted questions only' },
+                  excludeId: { type: 'string', format: 'uuid', description: 'Question being edited, left out of the matches' },
+                },
               },
             },
           },
@@ -1376,6 +1380,8 @@ export const openApiSpec = {
             description: 'Users need a grant on the client; reviewers may use any client. null makes it unrestricted',
           },
           tags: { $ref: '#/components/schemas/CreateQuestionRequest/properties/tags' },
+          confirmDistinct: { $ref: '#/components/schemas/CreateQuestionRequest/properties/confirmDistinct' },
+          distinctReason: { $ref: '#/components/schemas/CreateQuestionRequest/properties/distinctReason' },
         },
       },
       Question: {
