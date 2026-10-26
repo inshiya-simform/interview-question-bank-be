@@ -3,7 +3,7 @@ import { env } from '../config/env.js';
 import { prisma } from '../db/prisma.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { recordAudit, recordAuditSafe } from './audit.service.js';
-import { passwordResetEmail } from './email/templates/index.js';
+import { passwordChangedEmail, passwordResetEmail, welcomeEmail } from './email/templates/index.js';
 import { sendEmailSafe } from './email/email.service.js';
 import type { AuthUser } from '../types/express.js';
 import { AppError } from '../utils/AppError.js';
@@ -72,6 +72,7 @@ export async function register(input: RegisterInput) {
       });
       return created;
     });
+    sendEmailSafe({ to: user.email, ...welcomeEmail({ name: user.name }) });
     return {
       user: { id: user.id, email: user.email, name: user.name, role: role.name },
       token: signToken(user.id),
@@ -130,22 +131,29 @@ export async function getMe(userId: string) {
 const hashResetToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
 // Always resolves the same way so the response never reveals whether an email is registered.
+// Replaces any unused reset tokens for the user and returns the frontend link for a fresh one.
+export async function createPasswordResetLink(userId: string, expiresInMinutes: number) {
+  const token = randomBytes(32).toString('hex');
+
+  await prisma.$transaction([
+    prisma.passwordResetToken.deleteMany({ where: { userId, usedAt: null } }),
+    prisma.passwordResetToken.create({
+      data: {
+        userId,
+        tokenHash: hashResetToken(token),
+        expiresAt: new Date(Date.now() + expiresInMinutes * 60_000),
+      },
+    }),
+  ]);
+
+  return `${env.frontendUrl.replace(/\/$/, '')}/reset-password?token=${token}`;
+}
+
 export async function forgotPassword(input: ForgotPasswordInput) {
   const user = await prisma.user.findUnique({ where: { email: input.email } });
   if (user) {
-    const token = randomBytes(32).toString('hex');
     const expiresInMinutes = env.passwordResetExpiryMinutes;
-
-    await prisma.$transaction([
-      prisma.passwordResetToken.deleteMany({ where: { userId: user.id, usedAt: null } }),
-      prisma.passwordResetToken.create({
-        data: {
-          userId: user.id,
-          tokenHash: hashResetToken(token),
-          expiresAt: new Date(Date.now() + expiresInMinutes * 60_000),
-        },
-      }),
-    ]);
+    const resetUrl = await createPasswordResetLink(user.id, expiresInMinutes);
 
     await recordAuditSafe({
       action: 'PASSWORD_RESET_REQUESTED',
@@ -154,7 +162,6 @@ export async function forgotPassword(input: ForgotPasswordInput) {
       actor: user,
     });
 
-    const resetUrl = `${env.frontendUrl.replace(/\/$/, '')}/reset-password?token=${token}`;
     sendEmailSafe({
       to: user.email,
       ...passwordResetEmail({ name: user.name, resetUrl, expiresInMinutes }),
@@ -183,7 +190,7 @@ export async function resetPassword(input: ResetPasswordInput) {
   const record = await findUsableResetToken(input.token);
 
   const passwordHash = await hashPassword(input.password);
-  await prisma.$transaction(async (tx) => {
+  const user = await prisma.$transaction(async (tx) => {
     // Conditional update makes consumption atomic if the same link is submitted twice at once.
     const consumed = await tx.passwordResetToken.updateMany({
       where: { id: record.id, usedAt: null },
@@ -201,8 +208,10 @@ export async function resetPassword(input: ResetPasswordInput) {
       entityId: user.id,
       actor: user,
     });
+    return user;
   });
 
+  sendEmailSafe({ to: user.email, ...passwordChangedEmail({ name: user.name }) });
   return { message: 'Password has been reset. You can now log in.' };
 }
 
@@ -218,6 +227,8 @@ export async function changePassword(userId: string, input: ChangePasswordInput)
     where: { id: userId },
     data: { passwordHash, passwordChangedAt: new Date() },
   });
+
+  sendEmailSafe({ to: user.email, ...passwordChangedEmail({ name: user.name }) });
 
   // Other sessions are now revoked; hand back a fresh token so this one stays signed in.
   return { token: signToken(userId), message: 'Password changed' };

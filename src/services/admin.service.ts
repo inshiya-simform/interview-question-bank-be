@@ -2,8 +2,12 @@ import { prisma } from '../db/prisma.js';
 import { Prisma } from '../generated/prisma/client.js';
 import { AppError } from '../utils/AppError.js';
 import type { AuthUser } from '../types/express.js';
+import { randomBytes } from 'node:crypto';
 import { hashPassword } from '../utils/password.js';
 import { recordAudit } from './audit.service.js';
+import { createPasswordResetLink } from './auth.service.js';
+import { clientAccessGrantedEmail, clientAccessRevokedEmail, staffWelcomeEmail } from './email/templates/index.js';
+import { sendEmailSafe } from './email/email.service.js';
 import type {
   CreateClientInput,
   CreateStaffInput,
@@ -12,8 +16,8 @@ import type {
   ListUsersQuery,
 } from '../validators/admin.validators.js';
 
-// Staff accounts start with this password; the super admin hands it over out of band.
-const DEFAULT_STAFF_PASSWORD = 'password123';
+// Staff set their own password through the emailed link, so the initial one is random and never shared.
+const STAFF_WELCOME_LINK_EXPIRY_MINUTES = 72 * 60;
 
 const userSelect = {
   id: true,
@@ -125,15 +129,15 @@ export async function grantClientAccess(
   clientId: string,
   { email }: GrantClientAccessInput,
 ) {
-  await loadClientAccess(clientId);
-  const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+  const access = await loadClientAccess(clientId);
+  const user = await prisma.user.findUnique({ where: { email }, select: { id: true, name: true } });
   if (!user) throw new AppError(404, 'NOT_FOUND', 'No user with that email');
 
-  await prisma.$transaction(async (tx) => {
+  const granted = await prisma.$transaction(async (tx) => {
     const existing = await tx.clientPermission.findUnique({
       where: { userId_clientId: { userId: user.id, clientId } },
     });
-    if (existing) return; // idempotent: nothing changed, nothing to audit
+    if (existing) return false; // idempotent: nothing changed, nothing to audit
     await tx.clientPermission.create({ data: { userId: user.id, clientId } });
     await recordAudit(tx, {
       action: 'GRANT_ACCESS',
@@ -142,16 +146,21 @@ export async function grantClientAccess(
       actor,
       changes: { userId: user.id, email },
     });
+    return true;
   });
+  if (granted) {
+    sendEmailSafe({ to: email, ...clientAccessGrantedEmail({ name: user.name, clientName: access.name }) });
+  }
   return loadClientAccess(clientId);
 }
 
 // Idempotent: revoking a missing grant is a no-op.
 export async function revokeClientAccess(actor: AuthUser, clientId: string, userId: string) {
-  await loadClientAccess(clientId);
-  await prisma.$transaction(async (tx) => {
+  const access = await loadClientAccess(clientId);
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true, name: true } });
+  const revoked = await prisma.$transaction(async (tx) => {
     const { count } = await tx.clientPermission.deleteMany({ where: { clientId, userId } });
-    if (count === 0) return; // idempotent: nothing changed, nothing to audit
+    if (count === 0) return false; // idempotent: nothing changed, nothing to audit
     await recordAudit(tx, {
       action: 'REVOKE_ACCESS',
       module: 'CLIENT_ACCESS',
@@ -159,7 +168,11 @@ export async function revokeClientAccess(actor: AuthUser, clientId: string, user
       actor,
       changes: { userId },
     });
+    return true;
   });
+  if (revoked && user) {
+    sendEmailSafe({ to: user.email, ...clientAccessRevokedEmail({ name: user.name, clientName: access.name }) });
+  }
   return loadClientAccess(clientId);
 }
 
@@ -168,7 +181,7 @@ export async function createStaff(actor: AuthUser, input: CreateStaffInput) {
   if (!role) throw new Error(`Role ${input.role} is missing; run the seed`);
 
   try {
-    const passwordHash = await hashPassword(DEFAULT_STAFF_PASSWORD);
+    const passwordHash = await hashPassword(randomBytes(32).toString('hex'));
     const user = await prisma.$transaction(async (tx) => {
       const created = await tx.user.create({
         data: {
@@ -188,6 +201,17 @@ export async function createStaff(actor: AuthUser, input: CreateStaffInput) {
         changes: { email: created.email, name: created.name, role: created.role.name },
       });
       return created;
+    });
+
+    const resetUrl = await createPasswordResetLink(user.id, STAFF_WELCOME_LINK_EXPIRY_MINUTES);
+    sendEmailSafe({
+      to: user.email,
+      ...staffWelcomeEmail({
+        name: user.name,
+        role: user.role.name,
+        resetUrl,
+        expiresInHours: STAFF_WELCOME_LINK_EXPIRY_MINUTES / 60,
+      }),
     });
     return toUserDto(user);
   } catch (err) {
