@@ -206,8 +206,21 @@ async function buildListWhere(
 
   // Filters narrow the visible set; they can never widen it.
   if (clientId) filters.push({ clientId });
-  if (tags) filters.push({ tags: { some: { tagId: { in: tags } } } });
-  if (categories) filters.push({ tags: { some: { categoryId: { in: categories } } } });
+  // OR within a category, AND across categories: (react OR node) AND (mid OR senior).
+  const tagIdsByCategory = new Map<number, number[]>();
+  if (tags) {
+    const found = await prisma.tag.findMany({ where: { id: { in: tags } }, select: { id: true, categoryId: true } });
+    for (const t of found) tagIdsByCategory.set(t.categoryId, [...(tagIdsByCategory.get(t.categoryId) ?? []), t.id]);
+    // Unknown tag ids match nothing, as they did before.
+    if (found.length === 0) filters.push({ id: { in: [] } });
+  }
+  for (const [categoryId, tagIds] of tagIdsByCategory) {
+    filters.push({ tags: { some: { categoryId, tagId: { in: tagIds } } } });
+  }
+  // A selected category with no selected tags only requires a tag in that category.
+  for (const categoryId of categories ?? []) {
+    if (!tagIdsByCategory.has(categoryId)) filters.push({ tags: { some: { categoryId } } });
+  }
 
   if (search) {
     const matches = await prisma.$queryRaw<{ id: string }[]>`
