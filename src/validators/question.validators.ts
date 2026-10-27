@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { MAX_NOTES_HTML_LENGTH, MAX_NOTES_TEXT_LENGTH } from '../constants/question.constants.js';
+import { normalizeText } from '../utils/normalize.js';
 import { htmlToPlainText, sanitizeNotesHtml } from '../utils/sanitizeHtml.js';
 
 const id = z.number().int().positive();
@@ -23,7 +24,12 @@ const tagSelectionSchema = z
 
 export const createQuestionSchema = z
   .object({
-    text: z.string().trim().min(1).max(2000),
+    text: z
+      .string()
+      .trim()
+      .min(1)
+      .max(2000)
+      .refine((v) => normalizeText(v).length > 0, 'Question must contain letters or numbers'),
     answerNotes,
     clientId: z.uuid().nullable().optional(),
     // [{ categoryId, tagIds }, ...] — one entry per category

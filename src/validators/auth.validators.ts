@@ -1,10 +1,16 @@
 import { z } from 'zod';
 
+const password = z
+  .string()
+  .min(8)
+  .max(72)
+  .refine((v) => v.trim().length > 0, 'Password cannot be only whitespace');
+
 export const registerSchema = z
   .object({
     email: z.string().trim().toLowerCase().pipe(z.email()),
     name: z.string().trim().min(1).max(100),
-    password: z.string().min(8).max(72),
+    password,
   })
   .strict();
 
@@ -26,7 +32,7 @@ export const verifyResetTokenSchema = z.object({ token: z.string().min(1) }).str
 export const resetPasswordSchema = z
   .object({
     token: z.string().min(1),
-    password: z.string().min(8).max(72),
+    password,
     confirmPassword: z.string(),
   })
   .strict()
@@ -38,7 +44,7 @@ export const resetPasswordSchema = z
 export const changePasswordSchema = z
   .object({
     currentPassword: z.string().min(1),
-    password: z.string().min(8).max(72),
+    password,
     confirmPassword: z.string(),
   })
   .strict()
