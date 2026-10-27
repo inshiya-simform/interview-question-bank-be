@@ -103,7 +103,9 @@ model User {
 
 model Client {
   id   String @id @default(uuid())
-  name String @unique
+  name String
+  // Lowercased, whitespace-collapsed name; uniqueness is checked on this so "Acme" and "acme " collide.
+  normalizedName String @unique
 
   permissions ClientPermission[]
   questions   Question[]

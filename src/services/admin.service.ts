@@ -39,6 +39,8 @@ const toUserDto = (u: UserRow) => ({
   clients: u.permissions.map((p) => p.client).sort((a, b) => a.name.localeCompare(b.name)),
 });
 
+const normalizeName = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
+
 export async function listUsers({ page, limit, search, role, excludeAdmin, clientId }: ListUsersQuery) {
   const where: Prisma.UserWhereInput = {
     ...(search && {
@@ -98,7 +100,7 @@ export async function listClients({ page, limit, search }: ListClientsQuery) {
 export async function createClient(actor: AuthUser, { name }: CreateClientInput) {
   try {
     const client = await prisma.$transaction(async (tx) => {
-      const created = await tx.client.create({ data: { name }, select: clientAccessSelect });
+      const created = await tx.client.create({ data: { name, normalizedName: normalizeName(name) }, select: clientAccessSelect });
       await recordAudit(tx, {
         action: 'CREATE',
         module: 'CLIENT',
