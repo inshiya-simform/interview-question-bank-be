@@ -24,7 +24,9 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_EXPIRES_IN
-        value: 1d
+        value: 15m
+      - key: REFRESH_TOKEN_EXPIRES_IN_DAYS
+        value: "180"
       - key: CORS_ORIGIN
         sync: false
       - key: SENDGRID_API_KEY

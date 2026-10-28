@@ -80,6 +80,43 @@ export const openApiSpec = {
         },
       },
     },
+    '/auth/refresh': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Exchange a refresh token for a new access + refresh token',
+        description:
+          'The presented refresh token is revoked and replaced. Reusing an already-used refresh token revokes the whole session (all tokens descended from the same login).',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/RefreshRequest' } } },
+        },
+        responses: {
+          '200': {
+            description: 'New token pair',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/TokenPair' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/auth/logout': {
+      post: {
+        tags: ['Auth'],
+        summary: 'Revoke a refresh token and its session (always 200)',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/RefreshRequest' } } },
+        },
+        responses: {
+          '200': {
+            description: 'Logged out',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Message' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+        },
+      },
+    },
     '/auth/forgot-password': {
       post: {
         tags: ['Auth'],
@@ -620,7 +657,7 @@ export const openApiSpec = {
         tags: ['Notifications'],
         summary: 'Live notification stream (Server-Sent Events)',
         description:
-          'Needs the Authorization header, so use a fetch-based SSE client (native EventSource cannot send it). Events: `ready` once connected (refetch your list and count then), `notification` with a Notification as JSON data. `: ping` comments keep the connection alive. The stream ends when the token expires or the password changes; reconnect to continue.',
+          'Needs the Authorization header, so use a fetch-based SSE client (native EventSource cannot send it). Events: `ready` once connected (refetch your list and count then), `notification` with a Notification as JSON data. `: ping` comments keep the connection alive. The stream ends when the access token expires (every 15 minutes) or the password changes; call `/auth/refresh` for a new access token, then reconnect to continue.',
         security: [{ bearerAuth: [] }],
         responses: {
           '200': { description: 'Event stream', content: { 'text/event-stream': { schema: { type: 'string' } } } },
@@ -1419,9 +1456,23 @@ export const openApiSpec = {
       AuthResult: {
         type: 'object',
         properties: {
-          token: { type: 'string' },
+          token: { type: 'string', description: 'Access token (JWT), valid for 15 minutes' },
+          refreshToken: {
+            type: 'string',
+            description: 'Opaque refresh token, valid for 6 months; single use, exchange it at /auth/refresh',
+          },
           user: { $ref: '#/components/schemas/AuthUser' },
         },
+      },
+      RefreshRequest: {
+        type: 'object',
+        required: ['refreshToken'],
+        additionalProperties: false,
+        properties: { refreshToken: { type: 'string', minLength: 1 } },
+      },
+      TokenPair: {
+        type: 'object',
+        properties: { token: { type: 'string' }, refreshToken: { type: 'string' } },
       },
       CreateQuestionRequest: {
         type: 'object',

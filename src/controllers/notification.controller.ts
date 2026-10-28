@@ -55,7 +55,7 @@ export const stream: RequestHandler = (req, res, next) => {
     const unsubscribe = hub.subscribe(userId, res);
 
     // The token was valid on connect, but the stream outlives it: end it at expiry so the client reconnects
-    // (and gets a 401 if it is no longer signed in).
+    // (the client refreshes its access token via /auth/refresh first, and gets a 401 if it is no longer signed in).
     const exp = (jwt.decode(req.headers.authorization!.slice(7)) as { exp?: number } | null)?.exp;
     // setTimeout overflows past ~24.8 days, so a longer-lived token just keeps its stream until the client leaves.
     const expiryMs = exp ? exp * 1000 - Date.now() : 0;

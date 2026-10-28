@@ -53,6 +53,11 @@ export const changePasswordSchema = z
     message: 'Passwords do not match',
   });
 
+export const refreshSchema = z.object({ refreshToken: z.string().min(1) }).strict();
+export const logoutSchema = refreshSchema;
+
+export type RefreshInput = z.infer<typeof refreshSchema>;
+export type LogoutInput = z.infer<typeof logoutSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
