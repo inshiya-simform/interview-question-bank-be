@@ -99,6 +99,7 @@ model User {
   images              QuestionImage[]
   collections         Collection[]
   savedQuestions      SavedQuestion[]
+  notifications       Notification[]
 }
 
 model Client {
@@ -326,4 +327,31 @@ model SavedQuestion {
   @@id([userId, questionId])
   @@index([collectionId, savedAt(sort: Desc)])
   @@index([questionId])
+}
+
+enum NotificationType {
+  CLIENT_ACCESS_GRANTED
+  CLIENT_ACCESS_REVOKED
+  QUESTION_APPROVED
+  QUESTION_CHANGES_REQUESTED
+  QUESTION_REJECTED
+  QUESTION_SUBMITTED
+  CLIENT_QUESTION_ADDED
+  IMPORT_FINISHED
+}
+
+// In-app notification. `data` holds ids and display names (questionId, clientId, ...); the client builds
+// the copy and deep link from `type`, so wording changes never need a migration.
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  type      NotificationType
+  data      Json
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, readAt])
 }

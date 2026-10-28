@@ -5,6 +5,7 @@ import { Prisma } from '../generated/prisma/client.js';
 import { recordAudit, recordAuditSafe } from './audit.service.js';
 import { passwordChangedEmail, passwordResetEmail, welcomeEmail } from './email/templates/index.js';
 import { sendEmailSafe } from './email/email.service.js';
+import { closeUser } from './notification/notification.hub.js';
 import type { AuthUser } from '../types/express.js';
 import { AppError } from '../utils/AppError.js';
 import { signToken } from '../utils/jwt.js';
@@ -212,6 +213,7 @@ export async function resetPassword(input: ResetPasswordInput) {
   });
 
   sendEmailSafe({ to: user.email, ...passwordChangedEmail({ name: user.name }) });
+  closeUser(user.id); // existing sessions are revoked, so their open streams end too
   return { message: 'Password has been reset. You can now log in.' };
 }
 
@@ -229,6 +231,7 @@ export async function changePassword(userId: string, input: ChangePasswordInput)
   });
 
   sendEmailSafe({ to: user.email, ...passwordChangedEmail({ name: user.name }) });
+  closeUser(user.id); // existing sessions are revoked, so their open streams end too
 
   // Other sessions are now revoked; hand back a fresh token so this one stays signed in.
   return { token: signToken(userId), message: 'Password changed' };
