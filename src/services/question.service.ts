@@ -8,6 +8,7 @@ import { AppError } from '../utils/AppError.js';
 import { recordAudit } from './audit.service.js';
 import { normalizeText } from '../utils/normalize.js';
 import { sendEmailSafe } from './email/email.service.js';
+import { clientMemberIds, notify, reviewerIdsFor } from './notification.service.js';
 import {
   questionApprovedEmail,
   questionChangesRequestedEmail,
@@ -183,6 +184,7 @@ export async function createQuestion(user: AuthUser, input: CreateQuestionInput)
     return created;
   });
 
+  notifyReviewers(user, question.id, question.text, clientId, 'submitted');
   return toDetailDto(user, question);
 }
 
@@ -507,6 +509,7 @@ export async function updateQuestion(user: AuthUser, id: string, input: UpdateQu
         changes: { ...changes, ...(published && { pendingReview: true }) } as Prisma.InputJsonObject,
       });
     });
+    notifyReviewers(user, id, next.text, next.clientId, published ? 'edited' : 'resubmitted');
   }
 
   return getQuestion(user, id);
@@ -740,6 +743,7 @@ async function applyReview(user: AuthUser, id: string, action: ReviewAction, exp
   });
 
   notifyAuthor(user, existing, action, published);
+  notifyInApp(user, existing, action, published, draft?.clientId ?? existing.clientId);
 }
 
 // Tells the author about the decision. Sent after the transaction commits, and a failed email never
@@ -761,6 +765,60 @@ function notifyAuthor(
         ? questionChangesRequestedEmail({ ...base, note: action.note })
         : questionRejectedEmail({ ...base, note: action.note ?? null, isEdit: published });
   sendEmailSafe({ to: author.email, ...content });
+}
+
+// Tells reviewers who can see the question that it is waiting for review. Sent after the transaction
+// commits; the submitter is never notified of their own submission.
+function notifyReviewers(
+  submitter: AuthUser,
+  questionId: string,
+  questionText: string,
+  clientId: string | null,
+  reason: 'submitted' | 'resubmitted' | 'edited',
+) {
+  void reviewerIdsFor(clientId, submitter.id).then((ids) =>
+    notify(ids, {
+      type: 'QUESTION_SUBMITTED',
+      data: { questionId, questionText, submitterName: submitter.name, reason },
+    }),
+  );
+}
+
+// In-app counterpart of notifyAuthor: the author hears the decision, and when a new question goes live
+// for a client, everyone holding a grant on that client hears about it.
+function notifyInApp(
+  reviewer: AuthUser,
+  question: { id: string; text: string; author: { id: string } },
+  action: ReviewAction,
+  published: boolean,
+  clientId: string | null,
+) {
+  const base = { questionId: question.id, questionText: question.text, reviewerName: reviewer.name };
+  if (question.author.id !== reviewer.id) {
+    if (action.kind === 'approve') {
+      void notify([question.author.id], { type: 'QUESTION_APPROVED', data: { ...base, isEdit: published } });
+    } else if (action.kind === 'requestChanges') {
+      void notify([question.author.id], { type: 'QUESTION_CHANGES_REQUESTED', data: { ...base, note: action.note } });
+    } else {
+      void notify([question.author.id], {
+        type: 'QUESTION_REJECTED',
+        data: { ...base, note: action.note ?? null, isEdit: published },
+      });
+    }
+  }
+
+  // Only a first approval is "new"; edits of a live question and unrestricted questions stay quiet.
+  if (action.kind !== 'approve' || published || !clientId) return;
+  void (async () => {
+    const [client, memberIds] = await Promise.all([
+      prisma.client.findUnique({ where: { id: clientId }, select: { name: true } }),
+      clientMemberIds(clientId, [question.author.id, reviewer.id]),
+    ]);
+    await notify(memberIds, {
+      type: 'CLIENT_QUESTION_ADDED',
+      data: { questionId: question.id, questionText: question.text, clientId, clientName: client?.name ?? null },
+    });
+  })().catch((err) => console.error(JSON.stringify({ event: 'notify_failed', error: String(err) })));
 }
 
 // Writes content onto the question row and replaces its tag set.

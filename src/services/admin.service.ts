@@ -8,6 +8,7 @@ import { recordAudit } from './audit.service.js';
 import { createPasswordResetLink } from './auth.service.js';
 import { clientAccessGrantedEmail, clientAccessRevokedEmail, staffWelcomeEmail } from './email/templates/index.js';
 import { sendEmailSafe } from './email/email.service.js';
+import { notify } from './notification.service.js';
 import type {
   CreateClientInput,
   CreateStaffInput,
@@ -152,6 +153,7 @@ export async function grantClientAccess(
   });
   if (granted) {
     sendEmailSafe({ to: email, ...clientAccessGrantedEmail({ name: user.name, clientName: access.name }) });
+    void notify([user.id], { type: 'CLIENT_ACCESS_GRANTED', data: { clientId, clientName: access.name } });
   }
   return loadClientAccess(clientId);
 }
@@ -174,6 +176,7 @@ export async function revokeClientAccess(actor: AuthUser, clientId: string, user
   });
   if (revoked && user) {
     sendEmailSafe({ to: user.email, ...clientAccessRevokedEmail({ name: user.name, clientName: access.name }) });
+    void notify([userId], { type: 'CLIENT_ACCESS_REVOKED', data: { clientId, clientName: access.name } });
   }
   return loadClientAccess(clientId);
 }

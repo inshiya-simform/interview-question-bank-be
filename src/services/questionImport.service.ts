@@ -5,6 +5,7 @@ import type { Prisma } from '../generated/prisma/client.js';
 import type { AuthUser } from '../types/express.js';
 import { AppError } from '../utils/AppError.js';
 import { normalizeText } from '../utils/normalize.js';
+import { notify } from './notification.service.js';
 import {
   CSV_COLUMNS,
   CSV_REQUIRED_COLUMNS,
@@ -230,6 +231,7 @@ export async function importQuestions(user: AuthUser, buffer: Buffer) {
     });
   });
 
+  void notify([user.id], { type: 'IMPORT_FINISHED', data: { count: items.length } });
   console.info(JSON.stringify({ event: 'questions_imported', userId: user.id, count: items.length }));
   return { imported: items.length, questions: items.map((q) => ({ id: q.id, text: q.text })) };
 }

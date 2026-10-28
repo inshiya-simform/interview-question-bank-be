@@ -18,6 +18,7 @@ export const openApiSpec = {
     { name: 'Tags', description: 'Tag categories and their tags' },
     { name: 'Questions', description: 'Interview questions' },
     { name: 'Collections', description: 'Your personal collections and the questions you saved into them' },
+    { name: 'Notifications', description: 'Your in-app notifications, with a live stream (SSE)' },
   ],
   paths: {
     '/health': {
@@ -531,6 +532,98 @@ export const openApiSpec = {
               },
             },
           },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/notifications': {
+      get: {
+        tags: ['Notifications'],
+        summary: 'List your notifications, newest first',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['all', 'unread'], default: 'all' } },
+          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+        ],
+        responses: {
+          '200': {
+            description: 'A page of notifications. total follows the status filter; unreadCount is always your overall unread count.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    items: { type: 'array', items: { $ref: '#/components/schemas/Notification' } },
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    total: { type: 'integer' },
+                    unreadCount: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/notifications/unread-count': {
+      get: {
+        tags: ['Notifications'],
+        summary: 'Your unread notification count',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'Unread count',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/UnreadCount' } } },
+          },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/notifications/read-all': {
+      post: {
+        tags: ['Notifications'],
+        summary: 'Mark all your notifications as read',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': {
+            description: 'All read',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/UnreadCount' } } },
+          },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/notifications/{id}/read': {
+      patch: {
+        tags: ['Notifications'],
+        summary: 'Mark one notification as read',
+        description: 'Idempotent. Another user\'s notification returns 404.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': {
+            description: 'Marked read; returns the new unread count',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/UnreadCount' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
+    '/notifications/stream': {
+      get: {
+        tags: ['Notifications'],
+        summary: 'Live notification stream (Server-Sent Events)',
+        description:
+          'Needs the Authorization header, so use a fetch-based SSE client (native EventSource cannot send it). Events: `ready` once connected (refetch your list and count then), `notification` with a Notification as JSON data. `: ping` comments keep the connection alive. The stream ends when the token expires or the password changes; reconnect to continue.',
+        security: [{ bearerAuth: [] }],
+        responses: {
+          '200': { description: 'Event stream', content: { 'text/event-stream': { schema: { type: 'string' } } } },
           '401': { $ref: '#/components/responses/Unauthorized' },
         },
       },
@@ -1576,6 +1669,29 @@ export const openApiSpec = {
         type: 'object',
         properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } },
       },
+      Notification: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          type: {
+            type: 'string',
+            enum: [
+              'CLIENT_ACCESS_GRANTED',
+              'CLIENT_ACCESS_REVOKED',
+              'QUESTION_APPROVED',
+              'QUESTION_CHANGES_REQUESTED',
+              'QUESTION_REJECTED',
+              'QUESTION_SUBMITTED',
+              'CLIENT_QUESTION_ADDED',
+              'IMPORT_FINISHED',
+            ],
+          },
+          data: { type: 'object', additionalProperties: true, description: 'Ids and names for the type, e.g. questionId, questionText, clientId, clientName, note, count' },
+          read: { type: 'boolean' },
+          createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      UnreadCount: { type: 'object', properties: { unreadCount: { type: 'integer' } } },
       Collection: {
         type: 'object',
         properties: {
