@@ -17,6 +17,22 @@ export const login: RequestHandler = async (req, res, next) => {
   }
 };
 
+export const refresh: RequestHandler = async (req, res, next) => {
+  try {
+    res.json(await authService.refresh(req.body));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const logout: RequestHandler = async (req, res, next) => {
+  try {
+    res.json(await authService.logout(req.body));
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const me: RequestHandler = async (req, res, next) => {
   try {
     res.json(await authService.getMe(req.user!.id));

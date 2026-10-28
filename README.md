@@ -206,7 +206,9 @@ Base path `/api/v1`. JSON in/out. Auth via `Authorization: Bearer <JWT>`.
 |---|---|---|---|
 | GET | `/health` | none | Liveness |
 | POST | `/auth/register` | none | Create user (role defaults to `USER`) |
-| POST | `/auth/login` | none | Returns JWT |
+| POST | `/auth/login` | none | Returns a 15-minute access JWT and a 6-month refresh token |
+| POST | `/auth/refresh` | none | Rotates the refresh token; returns a new access + refresh token |
+| POST | `/auth/logout` | none | Revokes the refresh token's session |
 | GET | `/auth/me` | any | Current user + client grants |
 | GET | `/tag-categories` | any | Categories with their tags (for filter UI) |
 | POST | `/tag-categories`, `/tag-categories/:id/tags` | reviewer | Manage taxonomy |
@@ -326,7 +328,8 @@ PORT=3000
 CORS_ORIGIN=http://localhost:5173
 DATABASE_URL=postgresql://postgres:postgres@db:5432/question_bank
 JWT_SECRET=change-me
-JWT_EXPIRES_IN=1d
+JWT_EXPIRES_IN=15m
+REFRESH_TOKEN_EXPIRES_IN_DAYS=180
 DUPLICATE_SIMILARITY_THRESHOLD=0.8
 ```
 

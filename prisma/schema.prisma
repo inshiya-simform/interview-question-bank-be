@@ -95,7 +95,8 @@ model User {
   reviewedQuestions   Question[]           @relation("QuestionReviewer")
   reviewLocks         QuestionReviewLock[]
   passwordResetTokens PasswordResetToken[]
-  auditLogs           AuditLog[]
+  refreshTokens       RefreshToken[]
+  auditLogs          AuditLog[]
   images              QuestionImage[]
   collections         Collection[]
   savedQuestions      SavedQuestion[]
@@ -256,6 +257,24 @@ model PasswordResetToken {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// Long-lived opaque refresh token; only its sha256 is stored. Each use rotates it (revokedAt set, a new
+// row in the same familyId issued). Presenting a revoked token means it leaked, so the family is revoked.
+model RefreshToken {
+  id          String    @id @default(uuid())
+  userId      String
+  tokenHash   String    @unique
+  familyId    String
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  replacedById String?
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
 }
 
 // System-wide activity trail, readable by the super admin only. actorEmail is a snapshot so the entry
