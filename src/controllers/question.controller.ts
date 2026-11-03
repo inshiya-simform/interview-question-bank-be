@@ -150,6 +150,15 @@ export const countQuestions: RequestHandler = async (req, res, next) => {
   }
 };
 
+export const listRelatedQuestions: RequestHandler = async (req, res, next) => {
+  try {
+    const { id } = questionIdParamSchema.parse(req.params);
+    res.json(await questionService.listRelatedQuestions(req.user!, id));
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const getQuestionHistory: RequestHandler = async (req, res, next) => {
   try {
     const { id } = questionIdParamSchema.parse(req.params);
