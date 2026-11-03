@@ -14,6 +14,7 @@ import {
   getReviewState,
   importQuestions,
   listQuestions,
+  listRelatedQuestions,
   listSubmissions,
   rejectQuestion,
   releaseReviewLock,
@@ -44,6 +45,7 @@ router.get('/submissions', requirePermission('question:read'), listSubmissions);
 router.get('/counts', requirePermission('question:read'), countQuestions);
 router.get('/export', requirePermission('question:read'), exportQuestions);
 router.get('/:id', requirePermission('question:read'), getQuestion);
+router.get('/:id/related', requirePermission('question:read'), listRelatedQuestions);
 router.get('/:id/history', requirePermission('question:read'), getQuestionHistory);
 router.get('/:id/review-state', requirePermission('question:review'), getReviewState);
 router.post('/', requirePermission('question:create'), validate(createQuestionSchema), createQuestion);

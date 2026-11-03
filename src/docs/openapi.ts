@@ -1389,6 +1389,35 @@ export const openApiSpec = {
         },
       },
     },
+    '/questions/{id}/related': {
+      get: {
+        tags: ['Questions'],
+        summary: 'Top 5 related questions, ranked by shared tags (requires question:read)',
+        description:
+          'Live questions sharing at least one tag with this one, most shared tags first (ties: newest first). The question itself is excluded. Same visibility rules as the list endpoint; a question the user cannot see returns 404.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '200': {
+            description: 'Up to 5 related questions; empty when the question has no tags or nothing is related',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    items: { type: 'array', items: { $ref: '#/components/schemas/RelatedQuestion' } },
+                  },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
     '/questions/{id}/history': {
       get: {
         tags: ['Questions'],
@@ -1721,6 +1750,22 @@ export const openApiSpec = {
           tags: { $ref: '#/components/schemas/CreateQuestionRequest/properties/tags' },
           confirmDistinct: { $ref: '#/components/schemas/CreateQuestionRequest/properties/confirmDistinct' },
           distinctReason: { $ref: '#/components/schemas/CreateQuestionRequest/properties/distinctReason' },
+        },
+      },
+      RelatedQuestion: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          text: { type: 'string' },
+          sharedTagCount: { type: 'integer', description: 'Number of tags shared with the requested question' },
+          tags: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { slug: { type: 'string' }, name: { type: 'string' } },
+            },
+          },
+          commentCount: { type: 'integer', description: 'Comments and replies in the discussion, not counting deleted ones' },
         },
       },
       Question: {

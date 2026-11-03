@@ -1,5 +1,6 @@
 import { env } from '../config/env.js';
 import { EXPORT_BATCH_SIZE, MAX_EXPORT_ROWS } from '../constants/export.constants.js';
+import { RELATED_QUESTIONS_LIMIT } from '../constants/question.constants.js';
 import { REVIEW_LOCK_TTL_MS } from '../constants/review.constants.js';
 import { prisma } from '../db/prisma.js';
 import type { Prisma, QuestionStatus } from '../generated/prisma/client.js';
@@ -535,6 +536,52 @@ export async function assertQuestionVisible(user: AuthUser, id: string) {
   });
   if (!q) throw new AppError(404, 'NOT_FOUND', 'Question not found');
   return q;
+}
+
+// Live questions ranked by how many tags they share with this one, ties broken newest first.
+export async function listRelatedQuestions(user: AuthUser, id: string) {
+  await assertQuestionVisible(user, id);
+
+  const sourceTags = await prisma.questionTag.findMany({ where: { questionId: id }, select: { tagId: true } });
+  if (sourceTags.length === 0) return { items: [] };
+
+  // The shared-tag count is a grouped count of join rows; visibility stays a Prisma where-input.
+  const shared = await prisma.questionTag.groupBy({
+    by: ['questionId'],
+    where: { tagId: { in: sourceTags.map((t) => t.tagId) }, questionId: { not: id }, question: liveFilter(user) },
+    _count: { _all: true },
+  });
+  if (shared.length === 0) return { items: [] };
+
+  const sharedCount = new Map(shared.map((s) => [s.questionId, s._count._all]));
+  const questions = await prisma.question.findMany({
+    where: { id: { in: [...sharedCount.keys()] } },
+    select: {
+      id: true,
+      text: true,
+      createdAt: true,
+      tags: { select: { tag: { select: { slug: true, name: true } } } },
+      _count: { select: { comments: { where: { deletedAt: null } } } },
+    },
+  });
+
+  const items = questions
+    .map((q) => ({ q, sharedTagCount: sharedCount.get(q.id)! }))
+    .sort(
+      (a, b) =>
+        b.sharedTagCount - a.sharedTagCount ||
+        b.q.createdAt.getTime() - a.q.createdAt.getTime() ||
+        a.q.id.localeCompare(b.q.id),
+    )
+    .slice(0, RELATED_QUESTIONS_LIMIT)
+    .map(({ q, sharedTagCount }) => ({
+      id: q.id,
+      text: q.text,
+      sharedTagCount,
+      tags: q.tags.map(({ tag }) => tag),
+      commentCount: q._count.comments,
+    }));
+  return { items };
 }
 
 export const approveQuestion = (user: AuthUser, id: string, { expectedUpdatedAt }: ApproveInput) =>
