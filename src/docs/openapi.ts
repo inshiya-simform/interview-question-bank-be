@@ -19,6 +19,7 @@ export const openApiSpec = {
     { name: 'Questions', description: 'Interview questions' },
     { name: 'Collections', description: 'Your personal collections and the questions you saved into them' },
     { name: 'Notifications', description: 'Your in-app notifications, with a live stream (SSE)' },
+    { name: 'Comments', description: 'Discussion threads on a question: comments, replies, mentions and votes' },
   ],
   paths: {
     '/health': {
@@ -662,6 +663,200 @@ export const openApiSpec = {
         responses: {
           '200': { description: 'Event stream', content: { 'text/event-stream': { schema: { type: 'string' } } } },
           '401': { $ref: '#/components/responses/Unauthorized' },
+        },
+      },
+    },
+    '/questions/{questionId}/comments': {
+      get: {
+        tags: ['Comments'],
+        summary: 'List the discussion on a question',
+        description:
+          'Top-level comments, each with its first 3 replies (oldest first), `replyCount` (live replies) and `hasMoreReplies`; page the rest with GET .../comments/{commentId}/replies. `top` sorts by score then newest; `new` by newest. total counts threads; totalComments counts every live comment and reply. A deleted comment that still has replies comes back with deleted: true and a null body. 404 when you cannot see the question.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'questionId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          { name: 'sort', in: 'query', schema: { type: 'string', enum: ['top', 'new'], default: 'top' } },
+          { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, default: 1 } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
+        ],
+        responses: {
+          '200': {
+            description: 'A page of threads',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    items: { type: 'array', items: { $ref: '#/components/schemas/Comment' } },
+                    page: { type: 'integer' },
+                    limit: { type: 'integer' },
+                    total: { type: 'integer' },
+                    totalComments: { type: 'integer' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+      post: {
+        tags: ['Comments'],
+        summary: 'Add a comment or reply',
+        description:
+          'Plain text; markup is stripped. A parentId that is itself a reply attaches to its root comment. Every id in `mentions` must belong to someone who can open this question (see mentionable-users), otherwise 400. Mentioned people get a COMMENT_MENTION notification.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'questionId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/CommentRequest' } } },
+        },
+        responses: {
+          '201': { description: 'Created', content: { 'application/json': { schema: { $ref: '#/components/schemas/Comment' } } } },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
+    '/questions/{questionId}/comments/{commentId}/replies': {
+      get: {
+        tags: ['Comments'],
+        summary: 'Replies of one thread',
+        description: 'Oldest first, keyset-paginated: pass the previous response\'s nextCursor to continue (null when there is no more). commentId must be a top-level comment. Show these after the replies already included in the thread.',
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: 'questionId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          { name: 'commentId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+          { name: 'cursor', in: 'query', schema: { type: 'string' } },
+          { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } },
+        ],
+        responses: {
+          '200': {
+            description: 'A page of replies',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    items: { type: 'array', items: { $ref: '#/components/schemas/Comment' } },
+                    nextCursor: { type: 'string', nullable: true },
+                  },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
+    '/questions/{questionId}/mentionable-users': {
+      get: {
+        tags: ['Comments'],
+        summary: 'People you can @mention on this question',
+        description:
+          'Only users who could open this question themselves: question:read, a grant on its client (unrestricted questions need none), and, before approval, only its author and reviewers. Excludes you. Filters by name or email prefix.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'questionId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }, { name: 'q', in: 'query', schema: { type: 'string', maxLength: 100 } }],
+        responses: {
+          '200': {
+            description: 'Up to 8 matches',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    items: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string', format: 'uuid' },
+                          name: { type: 'string' },
+                          email: { type: 'string' },
+                          role: { type: 'string', enum: ['SUPER_ADMIN', 'REVIEWER', 'USER'] },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
+    '/questions/{questionId}/comments/{commentId}': {
+      patch: {
+        tags: ['Comments'],
+        summary: 'Edit your comment',
+        description: 'Author only. Sets editedAt; only people newly mentioned by the edit are notified.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'questionId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }, { name: 'commentId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/CommentRequest' } } },
+        },
+        responses: {
+          '200': { description: 'Updated', content: { 'application/json': { schema: { $ref: '#/components/schemas/Comment' } } } },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+      delete: {
+        tags: ['Comments'],
+        summary: 'Delete a comment',
+        description: 'The author, or a reviewer who can see the question. Soft delete: replies stay.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'questionId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }, { name: 'commentId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          '204': { description: 'Deleted' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
+    '/questions/{questionId}/comments/{commentId}/vote': {
+      put: {
+        tags: ['Comments'],
+        summary: 'Upvote, downvote or clear your vote',
+        description: 'value 1 or -1 sets the vote (switching replaces it); 0 removes it. Voting on your own comment is 403.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'questionId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }, { name: 'commentId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { type: 'object', required: ['value'], properties: { value: { type: 'integer', enum: [1, -1, 0] } } },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'The comment\'s new score and your vote',
+            content: {
+              'application/json': {
+                schema: { type: 'object', properties: { score: { type: 'integer' }, myVote: { type: 'integer', enum: [1, -1, 0] } } },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
         },
       },
     },
@@ -1533,6 +1728,7 @@ export const openApiSpec = {
         properties: {
           id: { type: 'string', format: 'uuid' },
           text: { type: 'string' },
+          commentCount: { type: 'integer', description: 'Comments and replies in the discussion, not counting deleted ones' },
           answerNotes: { type: 'string' },
           client: {
             type: 'object',
@@ -1735,11 +1931,46 @@ export const openApiSpec = {
               'QUESTION_SUBMITTED',
               'CLIENT_QUESTION_ADDED',
               'IMPORT_FINISHED',
+              'COMMENT_MENTION',
             ],
           },
           data: { type: 'object', additionalProperties: true, description: 'Ids and names for the type, e.g. questionId, questionText, clientId, clientName, note, count' },
           read: { type: 'boolean' },
           createdAt: { type: 'string', format: 'date-time' },
+        },
+      },
+      Comment: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          parentId: { type: 'string', format: 'uuid', nullable: true },
+          body: { type: 'string', nullable: true, description: 'null when deleted' },
+          deleted: { type: 'boolean' },
+          author: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } },
+          isReviewer: { type: 'boolean' },
+          mentions: {
+            type: 'array',
+            items: { type: 'object', properties: { id: { type: 'string', format: 'uuid' }, name: { type: 'string' } } },
+          },
+          score: { type: 'integer' },
+          myVote: { type: 'integer', enum: [1, -1, 0] },
+          createdAt: { type: 'string', format: 'date-time' },
+          editedAt: { type: 'string', format: 'date-time', nullable: true },
+          canEdit: { type: 'boolean' },
+          canDelete: { type: 'boolean' },
+          canVote: { type: 'boolean', description: 'false for your own comments' },
+          replies: { type: 'array', items: { type: 'object' }, description: 'List items only: the first 3 replies, same shape, no nesting' },
+          replyCount: { type: 'integer', description: 'List items only: live replies in the thread' },
+          hasMoreReplies: { type: 'boolean', description: 'List items only: more replies than `replies` holds' },
+        },
+      },
+      CommentRequest: {
+        type: 'object',
+        required: ['body'],
+        properties: {
+          body: { type: 'string', minLength: 1, maxLength: 2000 },
+          mentions: { type: 'array', maxItems: 10, items: { type: 'string', format: 'uuid' } },
+          parentId: { type: 'string', format: 'uuid', description: 'Create only' },
         },
       },
       UnreadCount: { type: 'object', properties: { unreadCount: { type: 'integer' } } },

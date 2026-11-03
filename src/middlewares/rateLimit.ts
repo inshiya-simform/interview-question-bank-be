@@ -29,3 +29,13 @@ export const imageUploadLimiter = rateLimit({
     error: { code: 'TOO_MANY_REQUESTS', message: 'Too many uploads, please try again later' },
   },
 });
+
+export const commentWriteLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: {
+    error: { code: 'TOO_MANY_REQUESTS', message: 'Too many requests, please slow down' },
+  },
+});
