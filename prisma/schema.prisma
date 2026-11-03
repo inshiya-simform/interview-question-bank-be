@@ -96,16 +96,19 @@ model User {
   reviewLocks         QuestionReviewLock[]
   passwordResetTokens PasswordResetToken[]
   refreshTokens       RefreshToken[]
-  auditLogs          AuditLog[]
+  auditLogs           AuditLog[]
   images              QuestionImage[]
   collections         Collection[]
   savedQuestions      SavedQuestion[]
   notifications       Notification[]
+  comments            Comment[]
+  commentVotes        CommentVote[]
+  commentMentions     CommentMention[]
 }
 
 model Client {
-  id   String @id @default(uuid())
-  name String
+  id             String @id @default(uuid())
+  name           String
   // Lowercased, whitespace-collapsed name; uniqueness is checked on this so "Acme" and "acme " collide.
   normalizedName String @unique
 
@@ -179,6 +182,7 @@ model Question {
   draft      QuestionDraft?
   reviewLock QuestionReviewLock?
   savedBy    SavedQuestion[]
+  comments   Comment[]
 
   @@index([clientId])
   @@index([authorId])
@@ -262,14 +266,14 @@ model PasswordResetToken {
 // Long-lived opaque refresh token; only its sha256 is stored. Each use rotates it (revokedAt set, a new
 // row in the same familyId issued). Presenting a revoked token means it leaked, so the family is revoked.
 model RefreshToken {
-  id          String    @id @default(uuid())
-  userId      String
-  tokenHash   String    @unique
-  familyId    String
-  expiresAt   DateTime
-  revokedAt   DateTime?
+  id           String    @id @default(uuid())
+  userId       String
+  tokenHash    String    @unique
+  familyId     String
+  expiresAt    DateTime
+  revokedAt    DateTime?
   replacedById String?
-  createdAt   DateTime  @default(now())
+  createdAt    DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -357,6 +361,7 @@ enum NotificationType {
   QUESTION_SUBMITTED
   CLIENT_QUESTION_ADDED
   IMPORT_FINISHED
+  COMMENT_MENTION
 }
 
 // In-app notification. `data` holds ids and display names (questionId, clientId, ...); the client builds
@@ -373,4 +378,57 @@ model Notification {
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([userId, readAt])
+}
+
+// Discussion on a question. One level of replies: a reply to a reply is stored under the root comment.
+// Deleting is soft (deletedAt) so replies keep their place; `score` is the sum of CommentVote.value.
+model Comment {
+  id         String    @id @default(uuid())
+  questionId String
+  authorId   String
+  parentId   String?
+  body       String
+  score      Int       @default(0)
+  editedAt   DateTime?
+  deletedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  question Question         @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  author   User             @relation(fields: [authorId], references: [id])
+  parent   Comment?         @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies  Comment[]        @relation("CommentReplies")
+  votes    CommentVote[]
+  mentions CommentMention[]
+
+  @@index([questionId, parentId, createdAt])
+  // Top: roots of a question by score. Replies: a thread's replies oldest first.
+  @@index([questionId, parentId, score(sort: Desc), createdAt(sort: Desc)])
+  @@index([parentId, createdAt])
+}
+
+// value is +1 or -1; removing a vote deletes the row.
+model CommentVote {
+  commentId String
+  userId    String
+  value     Int
+  createdAt DateTime @default(now())
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([commentId, userId])
+  @@index([userId])
+}
+
+// People mentioned in a comment, validated against who may open the question when the comment is written.
+model CommentMention {
+  commentId String
+  userId    String
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([commentId, userId])
+  @@index([userId])
 }

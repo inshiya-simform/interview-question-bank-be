@@ -526,6 +526,17 @@ export async function getQuestion(user: AuthUser, id: string) {
   return toDetailDto(user, q);
 }
 
+// Gate for everything attached to a question (discussion): same rule as getQuestion, and an invisible
+// question looks the same as a missing one.
+export async function assertQuestionVisible(user: AuthUser, id: string) {
+  const q = await prisma.question.findFirst({
+    where: { AND: [{ id }, visibilityFilter(user), await reviewerDraftFilter(user)] },
+    select: { id: true, text: true, authorId: true, clientId: true, publishedAt: true, draft: { select: { payload: true } } },
+  });
+  if (!q) throw new AppError(404, 'NOT_FOUND', 'Question not found');
+  return q;
+}
+
 export const approveQuestion = (user: AuthUser, id: string, { expectedUpdatedAt }: ApproveInput) =>
   review(user, id, { kind: 'approve' }, expectedUpdatedAt);
 export const requestChanges = (
@@ -846,6 +857,7 @@ export const questionInclude = {
   author: { select: { id: true, name: true } },
   draft: true,
   reviewLock: { select: { expiresAt: true, lockedBy: { select: { id: true, name: true } } } },
+  _count: { select: { comments: { where: { deletedAt: null } } } },
 } satisfies Prisma.QuestionInclude;
 
 type QuestionRow = Prisma.QuestionGetPayload<{ include: typeof questionInclude }>;
@@ -878,6 +890,7 @@ export function toQuestionDto(user: AuthUser, q: QuestionRow) {
     client: q.client,
     tags: groupTags(q.tags.map((t) => t.tag)),
     authorId: q.authorId,
+    commentCount: q._count.comments,
     // A live question under re-review is still approved as far as everyone else is concerned.
     status: seesReview ? q.status : 'APPROVED',
     createdAt: q.createdAt,
