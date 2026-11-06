@@ -138,8 +138,9 @@ export async function grantClientAccess(
   { email }: GrantClientAccessInput,
 ) {
   const access = await loadClientAccess(clientId);
-  const user = await prisma.user.findUnique({ where: { email }, select: { id: true, name: true } });
+  const user = await prisma.user.findUnique({ where: { email }, select: { id: true, name: true, isActive: true } });
   if (!user) throw new AppError(404, 'NOT_FOUND', 'No user with that email');
+  if (!user.isActive) throw new AppError(409, 'CONFLICT', 'Cannot grant client access to an inactive user');
 
   const granted = await prisma.$transaction(async (tx) => {
     const existing = await tx.clientPermission.findUnique({
