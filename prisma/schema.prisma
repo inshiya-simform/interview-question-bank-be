@@ -84,6 +84,8 @@ model User {
   passwordHash      String
   // Tokens issued before this moment are rejected (set on password reset/change).
   passwordChangedAt DateTime?
+  // Inactive users cannot log in, refresh, or use an existing token. Set by the super admin.
+  isActive          Boolean   @default(true)
   roleId            Int
   createdAt         DateTime  @default(now())
 

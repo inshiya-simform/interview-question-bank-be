@@ -321,6 +321,39 @@ export const openApiSpec = {
         },
       },
     },
+    '/admin/users/{userId}/status': {
+      patch: {
+        tags: ['Admin'],
+        summary: 'Mark a user active or inactive (SUPER_ADMIN)',
+        description:
+          'An inactive user cannot log in (403: "Your account has been marked inactive. Please contact admin@yopmail.com."), ' +
+          'and their existing sessions are revoked. Idempotent. You cannot change your own status or a super admin.',
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: 'userId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['isActive'],
+                properties: { isActive: { type: 'boolean' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Updated user',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/AdminUser' } } },
+          },
+          '400': { $ref: '#/components/responses/ValidationError' },
+          '401': { $ref: '#/components/responses/Unauthorized' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        },
+      },
+    },
     '/admin/audit-logs': {
       get: {
         tags: ['Audit'],
@@ -2054,6 +2087,7 @@ export const openApiSpec = {
           name: { type: 'string' },
           role: { type: 'string', example: 'USER' },
           createdAt: { type: 'string', format: 'date-time' },
+          isActive: { type: 'boolean' },
           clients: {
             type: 'array',
             items: {

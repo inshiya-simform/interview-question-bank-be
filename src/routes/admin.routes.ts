@@ -6,11 +6,17 @@ import {
   listClients,
   listUsers,
   revokeClientAccess,
+  setUserStatus,
 } from '../controllers/admin.controller.js';
 import { authenticate } from '../middlewares/authenticate.js';
 import { requirePermission } from '../middlewares/requirePermission.js';
 import { validate } from '../middlewares/validate.js';
-import { createClientSchema, createStaffSchema, grantClientAccessSchema } from '../validators/admin.validators.js';
+import {
+  createClientSchema,
+  createStaffSchema,
+  grantClientAccessSchema,
+  setUserStatusSchema,
+} from '../validators/admin.validators.js';
 
 const router = Router();
 
@@ -19,6 +25,7 @@ router.use(authenticate);
 // Authors & reviewers page
 router.get('/users', requirePermission('user:read'), listUsers);
 router.post('/users', requirePermission('user:create_staff'), validate(createStaffSchema), createStaff);
+router.patch('/users/:userId/status', requirePermission('user:manage'), validate(setUserStatusSchema), setUserStatus);
 
 // Client access page
 router.get('/clients', requirePermission('client:read_all'), listClients);

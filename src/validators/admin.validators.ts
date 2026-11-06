@@ -43,10 +43,14 @@ export const grantClientAccessSchema = z
 
 export const createClientSchema = z.object({ name: z.string().trim().min(1).max(100) }).strict();
 
+export const setUserStatusSchema = z.object({ isActive: z.boolean() }).strict();
+
+export const userIdParamSchema = z.object({ userId: z.uuid() });
 export const clientIdParamSchema = z.object({ clientId: z.uuid() });
 export const clientUserParamSchema = z.object({ clientId: z.uuid(), userId: z.uuid() });
 
 export type CreateStaffInput = z.infer<typeof createStaffSchema>;
+export type SetUserStatusInput = z.infer<typeof setUserStatusSchema>;
 export type CreateClientInput = z.infer<typeof createClientSchema>;
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
 export type ListClientsQuery = z.infer<typeof listClientsQuerySchema>;
