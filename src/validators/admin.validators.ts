@@ -18,6 +18,7 @@ export const listUsersQuerySchema = z
     // matches user name or email
     search: z.string().trim().min(1).max(200).optional(),
     role: z.enum(['REVIEWER', 'USER']).optional(),
+    status: z.enum(['active', 'inactive']).optional(),
     // only users with a grant on this client
     clientId: z.uuid().optional(),
     // query strings are text, so z.coerce.boolean() would treat "false" as true

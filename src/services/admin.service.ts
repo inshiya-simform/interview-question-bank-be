@@ -46,7 +46,7 @@ const toUserDto = (u: UserRow) => ({
 
 const normalizeName = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
 
-export async function listUsers({ page, limit, search, role, excludeAdmin, clientId }: ListUsersQuery) {
+export async function listUsers({ page, limit, search, role, status, excludeAdmin, clientId }: ListUsersQuery) {
   const where: Prisma.UserWhereInput = {
     ...(search && {
       OR: [
@@ -55,6 +55,7 @@ export async function listUsers({ page, limit, search, role, excludeAdmin, clien
       ],
     }),
     ...(role && { role: { name: role } }),
+    ...(status && { isActive: status === 'active' }),
     ...(excludeAdmin && { role: { name: role ?? { not: 'SUPER_ADMIN' } } }),
     ...(clientId && { permissions: { some: { clientId } } }),
   };

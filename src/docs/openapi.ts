@@ -261,6 +261,7 @@ export const openApiSpec = {
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
           { name: 'search', in: 'query', schema: { type: 'string' } },
           { name: 'role', in: 'query', schema: { type: 'string', enum: ['REVIEWER', 'USER'] } },
+          { name: 'status', in: 'query', schema: { type: 'string', enum: ['active', 'inactive'] } },
           {
             name: 'clientId',
             in: 'query',
