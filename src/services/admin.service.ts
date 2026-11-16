@@ -5,14 +5,16 @@ import type { AuthUser } from '../types/express.js';
 import { randomBytes } from 'node:crypto';
 import { hashPassword } from '../utils/password.js';
 import { recordAudit } from './audit.service.js';
-import { createPasswordResetLink } from './auth.service.js';
+import { createPasswordResetLink, revokeAllRefreshTokens } from './auth.service.js';
 import { clientAccessGrantedEmail, clientAccessRevokedEmail, staffWelcomeEmail } from './email/templates/index.js';
 import { sendEmailSafe } from './email/email.service.js';
+import { closeUser } from './notification/notification.hub.js';
 import { notify } from './notification.service.js';
 import type {
   CreateClientInput,
   CreateStaffInput,
   GrantClientAccessInput,
+  SetUserStatusInput,
   ListClientsQuery,
   ListUsersQuery,
 } from '../validators/admin.validators.js';
@@ -25,6 +27,7 @@ const userSelect = {
   email: true,
   name: true,
   createdAt: true,
+  isActive: true,
   role: { select: { name: true } },
   permissions: { select: { client: { select: { id: true, name: true } } } },
 } satisfies Prisma.UserSelect;
@@ -37,12 +40,13 @@ const toUserDto = (u: UserRow) => ({
   name: u.name,
   role: u.role.name,
   createdAt: u.createdAt,
+  isActive: u.isActive,
   clients: u.permissions.map((p) => p.client).sort((a, b) => a.name.localeCompare(b.name)),
 });
 
 const normalizeName = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
 
-export async function listUsers({ page, limit, search, role, excludeAdmin, clientId }: ListUsersQuery) {
+export async function listUsers({ page, limit, search, role, status, excludeAdmin, clientId }: ListUsersQuery) {
   const where: Prisma.UserWhereInput = {
     ...(search && {
       OR: [
@@ -51,6 +55,7 @@ export async function listUsers({ page, limit, search, role, excludeAdmin, clien
       ],
     }),
     ...(role && { role: { name: role } }),
+    ...(status && { isActive: status === 'active' }),
     ...(excludeAdmin && { role: { name: role ?? { not: 'SUPER_ADMIN' } } }),
     ...(clientId && { permissions: { some: { clientId } } }),
   };
@@ -133,8 +138,9 @@ export async function grantClientAccess(
   { email }: GrantClientAccessInput,
 ) {
   const access = await loadClientAccess(clientId);
-  const user = await prisma.user.findUnique({ where: { email }, select: { id: true, name: true } });
+  const user = await prisma.user.findUnique({ where: { email }, select: { id: true, name: true, isActive: true } });
   if (!user) throw new AppError(404, 'NOT_FOUND', 'No user with that email');
+  if (!user.isActive) throw new AppError(409, 'CONFLICT', 'Cannot grant client access to an inactive user');
 
   const granted = await prisma.$transaction(async (tx) => {
     const existing = await tx.clientPermission.findUnique({
@@ -225,4 +231,32 @@ export async function createStaff(actor: AuthUser, input: CreateStaffInput) {
     }
     throw err;
   }
+}
+
+export async function setUserStatus(actor: AuthUser, userId: string, { isActive }: SetUserStatusInput) {
+  const target = await prisma.user.findUnique({ where: { id: userId }, select: userSelect });
+  if (!target) throw new AppError(404, 'NOT_FOUND', 'User not found');
+  if (target.id === actor.id) throw new AppError(400, 'VALIDATION_ERROR', 'You cannot change your own status');
+  if (target.role.name === 'SUPER_ADMIN') {
+    throw new AppError(403, 'FORBIDDEN', 'A super admin cannot be marked inactive');
+  }
+  if (target.isActive === isActive) return toUserDto(target); // idempotent
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const user = await tx.user.update({ where: { id: userId }, data: { isActive }, select: userSelect });
+    await recordAudit(tx, {
+      action: 'UPDATE',
+      module: 'USER',
+      entityId: userId,
+      actor,
+      changes: { isActive: { from: target.isActive, to: isActive } },
+    });
+    return user;
+  });
+
+  if (!isActive) {
+    await revokeAllRefreshTokens(userId);
+    closeUser(userId); // authenticate rejects their tokens from now on, so end open streams too
+  }
+  return toUserDto(updated);
 }

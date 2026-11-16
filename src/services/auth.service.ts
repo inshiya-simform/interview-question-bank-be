@@ -23,6 +23,9 @@ import type {
 
 const DEFAULT_ROLE = 'USER';
 
+export const inactiveUserError = () =>
+  new AppError(403, 'FORBIDDEN', 'Your account has been marked inactive. Please contact admin@yopmail.com.');
+
 // Compared against when the email is unknown so response time doesn't reveal which emails exist.
 const DUMMY_HASH = '$2b$10$mgnFPfc1WD53UsZqeqGkVuL3w4SmUlfCTMdJPyi9RerxqRuDHrtzG';
 
@@ -46,6 +49,7 @@ const toAuthUser = (user: UserWithAuth): AuthUser => ({
 export async function loadAuthUser(userId: string, issuedAt?: number): Promise<AuthUser | null> {
   const user = await prisma.user.findUnique({ where: { id: userId }, include: authInclude });
   if (!user) return null;
+  if (!user.isActive) throw inactiveUserError();
   if (
     issuedAt !== undefined &&
     user.passwordChangedAt &&
@@ -85,7 +89,7 @@ const revokeFamily = (familyId: string) =>
     data: { revokedAt: new Date() },
   });
 
-const revokeAllRefreshTokens = (userId: string) =>
+export const revokeAllRefreshTokens = (userId: string) =>
   prisma.refreshToken.updateMany({
     where: { userId, revokedAt: null },
     data: { revokedAt: new Date() },
@@ -138,6 +142,17 @@ export async function login(input: LoginInput) {
     });
     throw new AppError(401, 'UNAUTHENTICATED', 'Invalid email or password');
   }
+  // Checked after the password so the message only reaches someone who knows the credentials.
+  if (!user.isActive) {
+    await recordAuditSafe({
+      action: 'LOGIN_FAILED',
+      module: 'AUTH',
+      entityId: user.id,
+      actor: user,
+      changes: { reason: 'inactive' },
+    });
+    throw inactiveUserError();
+  }
 
   await recordAuditSafe({
     action: 'LOGIN',
@@ -166,6 +181,7 @@ export async function refresh(input: RefreshInput) {
     throw invalidRefreshToken();
   }
   if (record.expiresAt <= new Date()) throw invalidRefreshToken();
+  if (!record.user.isActive) throw inactiveUserError();
 
   const changedAt = record.user.passwordChangedAt;
   if (changedAt && record.createdAt < new Date(Math.floor(changedAt.getTime() / 1000) * 1000)) {

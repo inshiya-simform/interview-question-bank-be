@@ -20,7 +20,7 @@ type RowError = { row: number; column?: string; message: string };
 export const IMPORT_TEMPLATE =
   CSV_COLUMNS.join(',') +
   '\n' +
-  '"What is the difference between interface and type in TypeScript?","Interfaces can be extended and merged; type aliases can name unions and primitives.",,technology:typescript;seniority:junior,,\n';
+  '"Tell me about a time you disagreed with a teammate. How did you handle it?","A good answer describes the situation, listens to the other view, stays respectful and reaches a clear outcome.",,question-type:behavioural;seniority:mid,,\n';
 
 function parseCsv(buffer: Buffer): Record<string, string>[] {
   let header: string[] = [];

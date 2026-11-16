@@ -18,6 +18,7 @@ export const listUsersQuerySchema = z
     // matches user name or email
     search: z.string().trim().min(1).max(200).optional(),
     role: z.enum(['REVIEWER', 'USER']).optional(),
+    status: z.enum(['active', 'inactive']).optional(),
     // only users with a grant on this client
     clientId: z.uuid().optional(),
     // query strings are text, so z.coerce.boolean() would treat "false" as true
@@ -43,10 +44,14 @@ export const grantClientAccessSchema = z
 
 export const createClientSchema = z.object({ name: z.string().trim().min(1).max(100) }).strict();
 
+export const setUserStatusSchema = z.object({ isActive: z.boolean() }).strict();
+
+export const userIdParamSchema = z.object({ userId: z.uuid() });
 export const clientIdParamSchema = z.object({ clientId: z.uuid() });
 export const clientUserParamSchema = z.object({ clientId: z.uuid(), userId: z.uuid() });
 
 export type CreateStaffInput = z.infer<typeof createStaffSchema>;
+export type SetUserStatusInput = z.infer<typeof setUserStatusSchema>;
 export type CreateClientInput = z.infer<typeof createClientSchema>;
 export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
 export type ListClientsQuery = z.infer<typeof listClientsQuerySchema>;

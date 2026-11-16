@@ -5,6 +5,7 @@ import {
   clientUserParamSchema,
   listClientsQuerySchema,
   listUsersQuerySchema,
+  userIdParamSchema,
 } from '../validators/admin.validators.js';
 
 export const listUsers: RequestHandler = async (req, res, next) => {
@@ -52,6 +53,15 @@ export const revokeClientAccess: RequestHandler = async (req, res, next) => {
   try {
     const { clientId, userId } = clientUserParamSchema.parse(req.params);
     res.json(await adminService.revokeClientAccess(req.user!, clientId, userId));
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const setUserStatus: RequestHandler = async (req, res, next) => {
+  try {
+    const { userId } = userIdParamSchema.parse(req.params);
+    res.json(await adminService.setUserStatus(req.user!, userId, req.body));
   } catch (err) {
     next(err);
   }
